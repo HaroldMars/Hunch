@@ -4,7 +4,7 @@
 import nodemailer from 'nodemailer';
 import path from 'node:path';
 import { UPLOAD_DIR } from './db.js';
-import { CLIENT_URL, ADMIN_URL } from './config.js';
+import { CLIENT_URL, ADMIN_URL, REAL_SERVICES } from './config.js';
 
 const cfg = {
   host: process.env.EMAIL_HOST || '',
@@ -13,7 +13,7 @@ const cfg = {
   pass: process.env.EMAIL_PASS || '',
   from: process.env.EMAIL_FROM || process.env.EMAIL_USER || '',
 };
-export const mailEnabled = () => !!(cfg.host && cfg.user && cfg.pass);
+export const mailEnabled = () => REAL_SERVICES && !!(cfg.host && cfg.user && cfg.pass);
 let transport = null;
 const tx = () => (transport ||= nodemailer.createTransport({
   host: cfg.host, port: cfg.port, secure: cfg.port === 465, requireTLS: cfg.port === 587,
@@ -35,7 +35,12 @@ ${cta ? `<p style="margin:22px 0 0"><a href="${esc(cta.url)}" style="background:
 /** Send one email. Resolves to true when sent, false when skipped or failed (never throws). */
 export async function sendMail({ to, subject, text, html, attachments = [] }) {
   const list = [].concat(to).filter(deliverable);
-  if (!mailEnabled() || !list.length) return false;
+  if (!mailEnabled()) {
+    // Local testing: show the email in the terminal instead of sending it.
+    if (!REAL_SERVICES) console.log(`[hunch] (test mode, not sent) Email to ${[].concat(to).join(', ')}: "${subject}"\n${text}\n`);
+    return false;
+  }
+  if (!list.length) return false;
   try {
     await tx().sendMail({ from: `Hunch <${cfg.from}>`, to: list.join(', '), subject, text, html, attachments });
     return true;

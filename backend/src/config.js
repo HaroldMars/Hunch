@@ -25,7 +25,10 @@ export const CLOUDINARY = {
   secret: process.env.CLOUDINARY_API_SECRET || '',
   folder: process.env.CLOUDINARY_FOLDER || 'hunch',
 };
-export const cloudinaryEnabled = () => !!(CLOUDINARY.cloud && CLOUDINARY.key && CLOUDINARY.secret);
+// Local testing never touches real services: Cloudinary and SMTP only run in production,
+// unless USE_REAL_SERVICES=1 is set deliberately for a one-off check.
+export const REAL_SERVICES = IS_PROD || process.env.USE_REAL_SERVICES === '1';
+export const cloudinaryEnabled = () => REAL_SERVICES && !!(CLOUDINARY.cloud && CLOUDINARY.key && CLOUDINARY.secret);
 
 if (IS_PROD) {
   const missing = ['JWT_SECRET', 'CLIENT_URL', 'ADMIN_URL'].filter((k) => !process.env[k]);
