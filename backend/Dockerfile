@@ -2,6 +2,7 @@
 #   docker build -f backend/Dockerfile -t hunch-api .
 FROM node:24-alpine
 ENV NODE_ENV=production
+ENV PORT=5000
 WORKDIR /app
 COPY shared ./shared
 COPY backend/package.json ./backend/package.json
