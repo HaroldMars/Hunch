@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { MOOD_KEYS, ROLE_LABELS } from '../../../shared/constants.js';
 import { get, all, run, tx, getSetting, setSetting, DEFAULT_SETTINGS, codeFor } from '../db.js';
 import { auth, requireModule, creatableRoles, manageableRoles, teamScope, modulesFor } from '../auth.js';
+import { sendWelcome, sendPasswordReset, mailEnabled } from '../mailer.js';
 import { h, fail, randomPassword, nowIso, localDay, fileUpload, fileUrl, selfUser } from '../util.js';
 import { notify, notifyStaff } from '../notify.js';
 import { statistics, teamReport, normalizeRange, dailySummary } from '../analytics.js';
@@ -187,7 +188,9 @@ function createAccount(creator, body) {
     title: 'New user registered', body: `${creator.full_name} created a ${ROLE_LABELS[role]} account for ${full_name}.`,
   });
   if (tl && tl !== creator.id) notify({ userId: tl, audience: 'admin', type: 'new_user', actorId: creator.id, entityType: 'user', entityId: id, title: 'New team member', body: `${full_name} (${ROLE_LABELS[role]}) was added to your team.` });
-  return { user: get(`SELECT ${STAFF_COLS} FROM users WHERE id = ?`, id), tempPassword: temp };
+  // Email the new person their sign-in details (only when SMTP is configured and the address is real).
+  sendWelcome(email, full_name.split(' ')[0], username || email, temp, role).then((ok) => ok && console.log(`[hunch] Welcome email sent to new ${role}.`));
+  return { user: get(`SELECT ${STAFF_COLS} FROM users WHERE id = ?`, id), tempPassword: temp, emailed: mailEnabled() };
 }
 
 r.post('/accounts', h((req, res) => {
@@ -276,7 +279,8 @@ r.post('/users/:id/reset-password', requireModule('users'), h((req, res) => {
   const temp = randomPassword();
   run('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?', bcrypt.hashSync(temp, 10), target.id);
   run("UPDATE password_reset_requests SET status = 'resolved', handled_by = ? WHERE user_id = ? AND status = 'pending'", req.user.id, target.id);
-  res.json({ tempPassword: temp });
+  sendPasswordReset(target.email, target.full_name.split(' ')[0], temp, target.role);
+  res.json({ tempPassword: temp, emailed: mailEnabled() });
 }));
 
 r.get('/password-requests', requireModule('users'), h((req, res) => {

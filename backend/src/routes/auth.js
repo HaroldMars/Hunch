@@ -7,6 +7,7 @@ import { auth, signToken, modulesFor, creatableRoles } from '../auth.js';
 import { h, fail, nowIso, validatePassword, selfUser, imageUpload, fileUrl, localDay, addDays } from '../util.js';
 import { MOODS } from '../../../shared/constants.js';
 import { notifyStaff } from '../notify.js';
+import { sendVerificationCode } from '../mailer.js';
 
 const r = Router();
 const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version;
@@ -101,13 +102,14 @@ r.post('/change-password', auth({ ready: false }), h((req, res) => {
   res.json(sessionPayload(fresh, req.app_kind));
 }));
 
-// Email verification. No SMTP is configured in the local build, so the code is
+// Email verification. The code is emailed when SMTP is configured; in development it is also
 // printed to the server console and returned as `devCode` for testing.
-r.post('/verify/send', auth({ ready: false }), h((req, res) => {
+r.post('/verify/send', auth({ ready: false }), h(async (req, res) => {
   const code = String(crypto.randomInt(100000, 999999));
   run('UPDATE users SET verify_code = ?, verify_expires = ? WHERE id = ?', code, new Date(Date.now() + 15 * 60e3).toISOString(), req.user.id);
-  console.log(`[hunch] Verification code for ${req.user.email}: ${code}`);
-  res.json({ sentTo: req.user.email, devCode: process.env.NODE_ENV === 'production' ? undefined : code });
+  const emailed = await sendVerificationCode(req.user.email, req.user.full_name.split(' ')[0], code);
+  if (process.env.NODE_ENV !== 'production') console.log(`[hunch] Verification code for ${req.user.email}: ${code}${emailed ? ' (also emailed)' : ''}`);
+  res.json({ sentTo: req.user.email, emailed, devCode: process.env.NODE_ENV === 'production' ? undefined : code });
 }));
 
 r.post('/verify', auth({ ready: false }), h((req, res) => {
