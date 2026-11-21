@@ -1,0 +1,46 @@
+# ---------- Secrets: never commit ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.jwt-secret
+
+# ---------- Dependencies ----------
+node_modules/
+
+# ---------- Builds ----------
+dist/
+build/
+.vite/
+
+# ---------- Vercel ----------
+.vercel
+
+# ---------- Logs ----------
+logs/
+*.log
+npm-debug.log*
+
+# ---------- Local data (databases contain real user data; uploads go to Cloudinary in production) ----------
+backend/data/
+backend/uploads/*
+!backend/uploads/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# ---------- Marketing: generated media stays out of Git (store in Cloudinary / a drive) ----------
+marketing/**/*.png
+marketing/**/*.jpg
+marketing/_tools/node_modules/
+marketing/_tools/generated/
+marketing/_tools/.demo-prepared
+marketing/_tools/.render.html
+
+# ---------- Misc ----------
+.DS_Store
+.idea/
+.vscode/
+*.swp

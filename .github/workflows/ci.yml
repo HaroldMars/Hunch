@@ -1,0 +1,27 @@
+name: CI
+# Runs on every pull request into main. Branch protection requires this check to pass before merging.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Build client and admin
+        run: npm run build
+      - name: Check backend syntax
+        run: for f in $(find backend/src backend/scripts -name '*.js'); do node --check "$f"; done
+      - name: Make sure no secrets or data are committed
+        run: |
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$'; then echo "A .env file is committed"; exit 1; fi
+          if git ls-files | grep -E '\.(db|sqlite)$|backend/data/'; then echo "A database file is committed"; exit 1; fi

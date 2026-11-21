@@ -1,0 +1,15 @@
+{
+  "name": "hunch-marketing-tools",
+  "private": true,
+  "type": "module",
+  "description": "Captures real Hunch screens and renders the marketing assets from them.",
+  "scripts": {
+    "prepare-demo": "node prepare-demo.mjs",
+    "capture": "node capture.mjs",
+    "compose": "node compose.mjs",
+    "all": "node prepare-demo.mjs && node capture.mjs && node compose.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "23.11.1"
+  }
+}

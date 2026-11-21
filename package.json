@@ -1,0 +1,21 @@
+{
+  "name": "hunch",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Hunch - Social Mood & Team Engagement Platform",
+  "workspaces": [
+    "backend",
+    "client",
+    "admin"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,client,admin -c magenta,cyan,yellow \"npm:dev -w backend\" \"npm:dev -w client\" \"npm:dev -w admin\"",
+    "seed:demo": "npm run seed:demo -w backend && npm run seed:v3 -w backend",
+    "reset": "npm run reset -w backend",
+    "build": "npm run build -w client && npm run build -w admin",
+    "seed:v3": "npm run seed:v3 -w backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

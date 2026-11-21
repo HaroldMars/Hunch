@@ -1,0 +1,77 @@
+/* Work widgets — themed through each app's own tokens (client: --surface-*, admin: --panel-*). */
+.wk-cal, .wk-mood {
+  --wk-s1: var(--surface-2, var(--panel-2, #1e1e1e));
+  --wk-s2: var(--surface-3, var(--panel-3, #2a2a2a));
+  --wk-line: var(--line, #2a2a2a);
+  --wk-text: var(--text, #fff);
+  --wk-text2: var(--text-2, #b8b8b8);
+  --wk-text3: var(--text-3, #7c7c7c);
+  --wk-primary: var(--primary, #5b8def);
+  --s-pos: #199e70; --s-low: #3987e5; --s-neg: #d95926;
+  color: var(--wk-text);
+}
+[data-theme="light"] .wk-mood, [data-theme="light"] .wk-cal { --s-pos: #1baf7a; --s-low: #2a78d6; --s-neg: #eb6834; }
+.wk-cal-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wk-seg { display: flex; padding: 3px; border-radius: 12px; background: var(--wk-s1); }
+.wk-seg button { border: 0; background: none; color: var(--wk-text2); font-weight: 700; font-size: 13px; padding: 7px 14px; border-radius: 9px; cursor: pointer; }
+.wk-seg button.on { background: var(--wk-s2); color: var(--wk-text); }
+.wk-nav { display: flex; gap: 6px; align-items: center; }
+.wk-nav button { height: 34px; min-width: 34px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--wk-line); background: var(--wk-s1); color: var(--wk-text); cursor: pointer; font-weight: 700; font-size: 13px; }
+.wk-nav .wk-today { padding: 0 12px; }
+.wk-title { display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 16px; margin: 14px 0 10px; }
+.wk-add { display: inline-flex; gap: 4px; align-items: center; border: 0; border-radius: 10px; padding: 7px 12px; background: var(--wk-primary); color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+.wk-loading, .wk-none { color: var(--wk-text3); font-size: 13px; padding: 6px 2px; }
+.wk-days { display: flex; flex-direction: column; gap: 10px; }
+.wk-day { padding: 10px; border-radius: 14px; background: var(--wk-s1); display: flex; flex-direction: column; gap: 6px; }
+.wk-day.today { box-shadow: inset 0 0 0 1.5px var(--wk-primary); }
+.wk-day-h { display: flex; justify-content: space-between; align-items: baseline; border: 0; background: none; color: var(--wk-text); padding: 0 2px 2px; cursor: pointer; }
+.wk-day-h span { color: var(--wk-text3); font-size: 12.5px; }
+.wk-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 10px; border-radius: 11px; border: 0; background: var(--wk-s2); color: var(--wk-text); cursor: pointer; }
+.wk-item > i { width: 4px; align-self: stretch; border-radius: 2px; background: var(--k); flex-shrink: 0; }
+.wk-it-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.wk-it-main b { font-size: 14px; }
+.wk-it-main small { font-size: 12px; color: var(--wk-text2); }
+.wk-kind { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; background: color-mix(in srgb, var(--k) 22%, transparent); color: var(--wk-text); white-space: nowrap; }
+.wk-month { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.wk-dow { text-align: center; font-size: 11px; font-weight: 700; color: var(--wk-text3); padding: 4px 0; }
+.wk-cell { position: relative; aspect-ratio: 1 / 1.05; border-radius: 10px; border: 0; background: var(--wk-s1); color: var(--wk-text); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; padding: 2px; }
+.wk-cell.out { opacity: .38; }
+.wk-cell.today { box-shadow: inset 0 0 0 1.5px var(--wk-primary); }
+.wk-cell .n { font-weight: 700; font-size: 13px; }
+.wk-cell .dots { display: flex; gap: 2px; min-height: 6px; }
+.wk-cell .dots i { width: 6px; height: 6px; border-radius: 50%; }
+.wk-cell .c { position: absolute; top: 3px; right: 5px; font-size: 9.5px; color: var(--wk-text3); font-weight: 700; }
+.wk-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; font-size: 11.5px; color: var(--wk-text2); }
+.wk-legend span { display: inline-flex; gap: 5px; align-items: center; }
+.wk-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.wk-legend i.s-pos, .wk-trend i.s-pos { background: var(--s-pos); }
+.wk-legend i.s-low, .wk-trend i.s-low { background: var(--s-low); }
+.wk-legend i.s-neg, .wk-trend i.s-neg { background: var(--s-neg); }
+/* mood */
+.wk-mood { display: flex; flex-direction: column; gap: 12px; }
+.wk-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.wk-kpis > div { padding: 12px; border-radius: 14px; background: var(--wk-s1); display: flex; flex-direction: column; gap: 3px; }
+.wk-kpis small { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--wk-text3); }
+.wk-kpis b { font-size: 20px; }
+.wk-kpis b.cap { text-transform: capitalize; }
+.wk-kpis span { font-size: 12px; color: var(--wk-text2); }
+.wk-card { padding: 14px; border-radius: 16px; background: var(--wk-s1); }
+.wk-card h4 { margin: 0; font-size: 15px; }
+.wk-hint { margin: 2px 0 10px; font-size: 12px; color: var(--wk-text3); }
+.wk-bars { display: flex; flex-direction: column; gap: 8px; }
+.wk-bar { display: grid; grid-template-columns: 104px 1fr 42px; gap: 10px; align-items: center; font-size: 13px; }
+.wk-bar .t { height: 10px; border-radius: 5px; background: var(--wk-s2); overflow: hidden; }
+.wk-bar .t i { display: block; height: 100%; border-radius: 0 4px 4px 0; background: var(--wk-primary); }
+.wk-bar b { text-align: right; font-variant-numeric: tabular-nums; }
+.wk-trend { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.wk-trow { display: grid; grid-template-columns: 40px 1fr 42px; gap: 10px; align-items: center; font-size: 12.5px; }
+.wk-trow .stack { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; }
+.wk-trow .stack i { display: block; height: 100%; }
+.wk-trow .stack em { font-size: 11px; color: var(--wk-text3); font-style: normal; }
+.wk-trow b { text-align: right; font-variant-numeric: tabular-nums; color: var(--wk-text2); }
+.wk-burn { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--wk-line); }
+.wk-burn .m { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.wk-burn small { color: var(--wk-text2); font-size: 12px; }
+.wk-burn .e { font-size: 20px; }
+@media (min-width: 900px) { .wk-kpis { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 900px) { .wk-cell { aspect-ratio: auto; height: 72px; } }
