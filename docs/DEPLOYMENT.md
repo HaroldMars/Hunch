@@ -38,7 +38,7 @@ docker run -p 5000:5000 -v hunch-data:/data --env-file backend/.env hunch-api
 
 Mount a persistent volume at `/data` (or set `DATA_DIR`). To run the API on Vercel itself, the database must first move to a hosted Postgres (`DATABASE_URL`) and realtime to a hosted service; that's a larger migration.
 
-Backend environment variables: see `backend/.env.example`. Required in production: `JWT_SECRET`, `CLIENT_URL`, `ADMIN_URL` (the server refuses to start without them). Set the Cloudinary variables so all media goes to Cloudinary.
+Backend environment variables: see `backend/.env.example`. Required in production: `JWT_SECRET`, `CLIENT_URL`, `ADMIN_URL` (the server refuses to start without them). Set the Cloudinary variables so all media goes to Cloudinary, and the `EMAIL_*` variables so Hunch can send verification codes, welcome and password-reset emails, and Email Center messages to outside addresses.
 
 ## 3. Security already in place
 - **Helmet** security headers, including HSTS so browsers only use HTTPS.
@@ -62,6 +62,7 @@ Never commit `.env` files, API keys, database URLs, JWT secrets, Cloudinary secr
 - [ ] `JWT_SECRET` set to a long random value on the API host
 - [ ] `CLIENT_URL`, `ADMIN_URL`, `API_URL` set; DNS for app / admin / api pointing at the right hosts; HTTPS on
 - [ ] Cloudinary variables set on the API host
+- [ ] `EMAIL_*` SMTP variables set (Gmail App Password)
 - [ ] `INITIAL_ADMIN_*` set (or read the one-time password from the first server log), then change it
 - [ ] Persistent disk mounted for the database, with backups
 - [ ] Branch protection on `main` (pull request + CI required)

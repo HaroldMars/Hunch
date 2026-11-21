@@ -1,11 +1,12 @@
 import { get, run } from './db.js';
 import { notify } from './notify.js';
 import { nowIso } from './util.js';
+import { sendComposed } from './mailer.js';
 
 /**
  * Deliver a composed email through the built-in mail system.
  * Recipients that match a Hunch account receive a copy in their inbox.
- * Other addresses are recorded as external (no SMTP relay in the local build).
+ * Other addresses are sent for real over SMTP when it is configured (see mailer.js).
  */
 export function deliverEmail(id) {
   const e = get('SELECT * FROM emails WHERE id = ?', id);
@@ -35,4 +36,11 @@ export function deliverEmail(id) {
     });
   }
   run("UPDATE emails SET folder = 'sent', sent_at = ?, scheduled_at = NULL, external = ?, is_read = 1 WHERE id = ?", nowIso(), JSON.stringify(external), id);
+  if (external.length) {
+    let attachments = [];
+    try { attachments = JSON.parse(e.attachments || '[]'); } catch { /* none */ }
+    sendComposed(external, sender?.full_name || e.from_email, e.subject, e.body, attachments).then((ok) => {
+      if (!ok) notify({ userId: e.from_id, audience: 'admin', type: 'email', entityType: 'email', entityId: id, title: 'Email not delivered outside Hunch', body: `“${e.subject}” reached Hunch accounts, but couldn’t be sent to ${external.join(', ')}.` });
+    });
+  }
 }
