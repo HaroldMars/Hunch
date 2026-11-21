@@ -1,0 +1,49 @@
+# Render Blueprint for the Hunch API (Dashboard > New > Blueprint > pick this repo).
+# Secrets are marked sync: false so Render asks for them; they are never stored in Git.
+services:
+  - type: web
+    name: hunch-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: starter            # a persistent disk needs a paid plan
+    healthCheckPath: /api/health
+    disk:
+      name: hunch-data
+      mountPath: /data       # SQLite database lives here (DATA_DIR=/data in the Dockerfile)
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_URL
+        value: https://app.hunch.ph
+      - key: ADMIN_URL
+        value: https://admin.hunch.ph
+      - key: API_URL
+        value: https://api.hunch.ph
+      - key: JWT_SECRET
+        sync: false
+      - key: INITIAL_ADMIN_USERNAME
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
+      - key: INITIAL_ADMIN_NAME
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: EMAIL_HOST
+        value: smtp.gmail.com
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

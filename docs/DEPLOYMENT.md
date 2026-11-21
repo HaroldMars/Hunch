@@ -36,7 +36,13 @@ docker build -f backend/Dockerfile -t hunch-api .
 docker run -p 5000:5000 -v hunch-data:/data --env-file backend/.env hunch-api
 ```
 
-Mount a persistent volume at `/data` (or set `DATA_DIR`). To run the API on Vercel itself, the database must first move to a hosted Postgres (`DATABASE_URL`) and realtime to a hosted service; that's a larger migration.
+Mount a persistent volume at `/data` (or set `DATA_DIR`).
+
+**Railway** (simplest): New Project → Deploy from GitHub repo → pick Hunch. It reads `railway.json` and builds `backend/Dockerfile`. Then add a **Volume** mounted at `/data`, add the variables from `backend/.env.example`, and under Settings → Networking add the custom domain `api.hunch.ph`.
+
+**Render**: New → Blueprint → pick the repo. It reads `render.yaml` (web service + 1 GB disk at `/data`) and asks for each secret. Add `api.hunch.ph` under Settings → Custom Domains.
+
+Do not create a Vercel project for `backend/`. If one exists, delete it. To run the API on Vercel itself, the database must first move to a hosted Postgres (`DATABASE_URL`) and realtime to a hosted service; that's a larger migration.
 
 Backend environment variables: see `backend/.env.example`. Required in production: `JWT_SECRET`, `CLIENT_URL`, `ADMIN_URL` (the server refuses to start without them). Set the Cloudinary variables so all media goes to Cloudinary, and the `EMAIL_*` variables so Hunch can send verification codes, welcome and password-reset emails, and Email Center messages to outside addresses.
 
