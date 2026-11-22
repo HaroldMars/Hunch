@@ -9,6 +9,7 @@ import {
 } from '../util.js';
 import { notify, notifyStaff } from '../notify.js';
 import { sessionPayload } from './auth.js';
+import { teamName } from '../teams.js';
 import { hydratePosts } from './posts.js';
 
 const r = Router();
@@ -59,6 +60,7 @@ r.get('/users/:id', h((req, res) => {
   res.json({
     ...u,
     team_leader: canView && tl ? publicUser(tl) : null,
+    team_name: canView && tl ? teamName(tl) : null,
     relation: relation(me, u.id),
     canView,
     counts,

@@ -5,7 +5,7 @@ import { auth } from '../auth.js';
 import { h, fail, imageUpload, fileUrl, deleteStoredFiles, publicUser, friendIds, areFriends, nowIso, hoursFromNow, localDay, blockedIds, canViewProfile, isBlocked } from '../util.js';
 import { postMessage } from './chats.js';
 import { notify } from '../notify.js';
-import { teamOf, teamMemberIds, teamLeader } from '../teams.js';
+import { teamOf, teamMemberIds, teamName } from '../teams.js';
 
 const r = Router();
 r.use(auth());
@@ -45,7 +45,7 @@ export const storyOut = (s, viewerId) => ({
     counts: st.options.map((_, i) => get('SELECT COUNT(*) c FROM story_poll_votes WHERE story_id = ? AND option = ?', s.id, i).c),
     my_vote: get('SELECT option FROM story_poll_votes WHERE story_id = ? AND user_id = ?', s.id, viewerId)?.option ?? null,
   } : st)),
-  team_name: s.team_id ? `Team ${teamLeader(s.team_id)?.full_name.split(' ')[0] || ''}` : null,
+  team_name: s.team_id ? teamName(s.team_id) : null,
 });
 
 r.get('/stories', h((req, res) => {

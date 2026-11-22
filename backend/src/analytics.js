@@ -155,6 +155,7 @@ export function statistics({ from, to, teamLeaderId = null, mood = null }) {
 export function teamReport(tlId, { from, to, mood = null, agentId = null, smeId = null }) {
   const tl = get('SELECT id, user_code, full_name, email, avatar, role, job_title, last_active_at, status FROM users WHERE id = ?', tlId);
   if (!tl) return null;
+  tl.team_name = get('SELECT name FROM teams WHERE tl_id = ?', tlId)?.name || null;
   const members = all(
     `SELECT id, user_code, full_name, email, avatar, role, status, last_active_at, last_login_at, created_at
      FROM users WHERE team_leader_id = ? ORDER BY role, full_name`, tlId

@@ -56,10 +56,10 @@ export const auth = ({ ready = true, app = null } = {}) => (req, res, next) => {
 
 // ---------- RBAC ----------
 export const MODULES = {
-  developer: ['stats', 'reports', 'workspace', 'notifications', 'email', 'users', 'admins', 'settings', 'register'],
-  manager: ['stats', 'reports', 'workspace', 'notifications', 'email', 'users', 'register'],
-  tl: ['stats', 'reports', 'workspace', 'notifications', 'email'],
-  sme: ['stats', 'reports', 'workspace', 'notifications', 'email'],
+  developer: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email', 'users', 'admins', 'settings', 'register'],
+  manager: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email', 'users', 'register'],
+  tl: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email'],
+  sme: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email'],
   agent: [],
 };
 export const modulesFor = (u) => {

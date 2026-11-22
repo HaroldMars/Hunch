@@ -6,6 +6,7 @@ import { api } from '../api.js';
 import { useAdmin, PageHead, Spinner, Empty, Avatar, ago, daysAgo, localDay, useLoad } from '../ui.jsx';
 import { RangeFilters, qs } from './Statistics.jsx';
 import { TotalsBars, Lines, MoodDistribution } from '../charts.jsx';
+import { TeamCompare } from './Teams.jsx';
 
 const Bar = ({ pct }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div className="bar" style={{ flex: 1 }}><i style={{ width: `${pct || 0}%` }} /></div><span className="small" style={{ width: 34, textAlign: 'right' }}>{pct ?? 0}%</span></div>
@@ -77,8 +78,9 @@ export default function Reports() {
       <div className="tabs">
         <button className={tab === 'teams' ? 'active' : ''} onClick={() => setTab('teams')}>Team leaders</button>
         <button className={tab === 'log' ? 'active' : ''} onClick={() => setTab('log')}>Mood log</button>
+        {!limited && <button className={tab === 'compare' ? 'active' : ''} onClick={() => setTab('compare')}>Team comparison</button>}
       </div>
-      {tab === 'log' ? <MoodLog fixedTeam={limited ? (user.role === 'tl' ? user.id : user.team_leader_id) : null} /> : (
+      {tab === 'compare' ? <><RangeFilters value={f} onChange={setF} showMood={false} /><TeamCompare range={f} /></> : tab === 'log' ? <MoodLog fixedTeam={limited ? (user.role === 'tl' ? user.id : user.team_leader_id) : null} /> : (
         <>
           <RangeFilters value={f} onChange={setF} showMood={false} />
           {!list ? <Spinner /> : !list.length ? <Empty icon="users" title="No team leaders yet">Create Team Leader accounts in Registration, then assign agents and SMEs to them.</Empty> : (
@@ -137,7 +139,7 @@ export function TeamReport() {
   return (
     <>
       <div className="small" style={{ marginBottom: 10 }}><Link to="/reports"><Icon name="back" size={14} style={{ verticalAlign: -2 }} /> All team leaders</Link></div>
-      <PageHead title={`Team ${tl.full_name}`} sub={`${tl.user_code} · ${tl.email} · ${s.agents} agents · ${s.smes} SMEs`}>
+      <PageHead title={tl.team_name || `Team ${tl.full_name}`} sub={`${tl.user_code} · ${tl.email} · ${s.agents} agents · ${s.smes} SMEs`}>
         <Avatar user={tl} size={44} />
       </PageHead>
       <RangeFilters value={f} onChange={setF}>
