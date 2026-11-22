@@ -1,3 +1,5 @@
+// Load and validate configuration first, before the database is opened or any account is created.
+import './config.js';
 import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';

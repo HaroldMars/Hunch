@@ -10,7 +10,9 @@ import { notifyStaff } from '../notify.js';
 import { sendVerificationCode } from '../mailer.js';
 
 const r = Router();
-const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version;
+// App version: APP_VERSION env, else the project's package.json, else the backend's (the Docker image only has backend/).
+const readVersion = (rel) => { try { return JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8')).version; } catch { return null; } };
+const APP_VERSION = process.env.APP_VERSION || readVersion('../../../package.json') || readVersion('../../package.json') || '0.0.0';
 
 const attempts = new Map(); // simple brute-force guard: key -> {n, until}
 function guard(key) {

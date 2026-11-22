@@ -9,8 +9,9 @@ COPY backend/package.json ./backend/package.json
 RUN cd backend && npm install --omit=dev --no-audit --no-fund
 COPY backend ./backend
 WORKDIR /app/backend
-# Persistent disk for the SQLite database (mount a volume here in production).
+# The SQLite database lives in /data. Attach a persistent volume at /data on the host
+# (Railway: service > Volumes; Render: disk in render.yaml). No VOLUME instruction:
+# Railway rejects Dockerfiles that declare one.
 ENV DATA_DIR=/data
-VOLUME ["/data"]
 EXPOSE 5000
 CMD ["node", "--disable-warning=ExperimentalWarning", "src/index.js"]
