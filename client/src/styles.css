@@ -1287,3 +1287,13 @@ textarea.input { resize: vertical; min-height: 80px; }
 .sc-target.on { background: #fff; color: #000; }
 .sc-target.on .lbl small { opacity: .6; }
 .sc-go { width: 52px; height: 52px; }
+
+/* Phones: no zooming in when tapping a field or double-tapping.
+   iOS zooms into any text field under 16px, so fields use 16px on touch screens. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+@media (hover: none) and (pointer: coarse) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .nb-lg textarea { font-size: 18px !important; } /* the large note bubble keeps its bigger text */
+}

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { get, all, run, getSetting } from '../db.js';
 import { auth, signToken, modulesFor, creatableRoles } from '../auth.js';
-import { h, fail, nowIso, validatePassword, selfUser, imageUpload, fileUrl, localDay, addDays } from '../util.js';
+import { h, fail, nowIso, validatePassword, selfUser, imageUpload, fileUrl, deleteStoredFiles, localDay, addDays } from '../util.js';
 import { MOODS } from '../../../shared/constants.js';
 import { notifyStaff } from '../notify.js';
 import { sendVerificationCode } from '../mailer.js';
@@ -178,6 +178,7 @@ r.post('/complete-profile', auth({ ready: false }), imageUpload.single('avatar')
   run('UPDATE users SET full_name = ?, job_title = ?, bio = ?, location = ?, avatar = COALESCE(?, avatar), profile_completed = 1 WHERE id = ?',
     full_name, String(b.job_title ?? u.job_title).slice(0, 80), String(b.bio ?? u.bio).slice(0, 300), String(b.location ?? u.location).slice(0, 80),
     fileUrl(req.file), u.id);
+  if (req.file) deleteStoredFiles(u.avatar);
   res.json(sessionPayload(get('SELECT * FROM users WHERE id = ?', u.id), req.app_kind));
 }));
 

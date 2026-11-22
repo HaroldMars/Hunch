@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { get, all, run, tx } from '../db.js';
 import { auth } from '../auth.js';
-import { h, fail, imageUpload, fileUrl, publicUser, friendIds, canViewProfile, areFriends, blockedIds } from '../util.js';
+import { h, fail, imageUpload, fileUrl, deleteStoredFiles, publicUser, friendIds, canViewProfile, areFriends, blockedIds } from '../util.js';
 import { notify } from '../notify.js';
 import { postMessage } from './chats.js';
 import { canAccessTeam, canManageTeam } from '../teams.js';
@@ -79,7 +79,12 @@ r.delete('/posts/:id', h((req, res) => {
   const p = get('SELECT * FROM posts WHERE id = ?', Number(req.params.id));
   if (!p) fail(404, 'Post not found.');
   if (p.user_id !== req.user.id && !(p.team_id && canManageTeam(req.user, p.team_id))) fail(403, 'You can only delete your own posts.');
+  const files = [
+    ...all('SELECT url FROM post_images WHERE post_id = ?', p.id).map((x) => x.url),
+    ...all('SELECT image FROM comments WHERE post_id = ? AND image IS NOT NULL', p.id).map((x) => x.image),
+  ];
   run('DELETE FROM posts WHERE id = ?', p.id);
+  deleteStoredFiles(files); // photos are removed from storage permanently
   res.json({ ok: true });
 }));
 
@@ -227,7 +232,10 @@ r.delete('/comments/:id', h((req, res) => {
   const c = get('SELECT c.*, p.user_id AS post_owner FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ?', Number(req.params.id));
   if (!c) fail(404, 'Comment not found.');
   if (c.user_id !== req.user.id && c.post_owner !== req.user.id) fail(403, 'Not allowed.');
+  const files = all(`WITH RECURSIVE t(id) AS (SELECT ? UNION ALL SELECT c.id FROM comments c JOIN t ON c.parent_id = t.id)
+    SELECT image FROM comments WHERE id IN (SELECT id FROM t) AND image IS NOT NULL`, c.id).map((x) => x.image);
   run('DELETE FROM comments WHERE id = ?', c.id);
+  deleteStoredFiles(files);
   res.json({ ok: true });
 }));
 

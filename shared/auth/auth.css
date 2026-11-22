@@ -198,3 +198,10 @@
 @media (prefers-reduced-motion: reduce) {
   .hx-auth *, .hx-auth *::before, .hx-auth *::after { animation: none !important; transition: none !important; }
 }
+
+/* Phones: no zooming in when tapping a field or double-tapping.
+   iOS zooms into any text field under 16px, so fields use 16px on touch screens. */
+.hx-auth { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+@media (hover: none) and (pointer: coarse) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
+}

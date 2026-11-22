@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { MOOD_KEYS, THEMES, wordCount, moodByKey } from '../../../shared/constants.js';
 import { get, all, run, tx, getSetting, userSettings } from '../db.js';
 import { auth } from '../auth.js';
-import { h, fail, imageUpload, fileUrl, publicUser, friendIds, areFriends, nowIso, hoursFromNow, localDay, blockedIds, canViewProfile, isBlocked } from '../util.js';
+import { h, fail, imageUpload, fileUrl, deleteStoredFiles, publicUser, friendIds, areFriends, nowIso, hoursFromNow, localDay, blockedIds, canViewProfile, isBlocked } from '../util.js';
 import { postMessage } from './chats.js';
 import { notify } from '../notify.js';
 import { teamOf, teamMemberIds, teamLeader } from '../teams.js';
@@ -213,6 +213,7 @@ r.delete('/stories/:id', h((req, res) => {
   const s = get('SELECT * FROM stories WHERE id = ?', Number(req.params.id));
   if (!s || s.user_id !== req.user.id) fail(404, 'Story not found.');
   run('DELETE FROM stories WHERE id = ?', s.id);
+  deleteStoredFiles(s.image); // kept only if a highlight still uses it as its cover
   res.json({ ok: true });
 }));
 
@@ -349,8 +350,10 @@ r.patch('/highlights/:id', h((req, res) => {
   });
   if (!itemCount(hl.id)) {
     run('DELETE FROM highlights WHERE id = ?', hl.id);
+    deleteStoredFiles(hl.cover_image);
     return res.json({ deleted: true });
   }
+  deleteStoredFiles(hl.cover_image); // only removed if the cover changed and nothing else uses it
   res.json(highlightOut(get('SELECT * FROM highlights WHERE id = ?', hl.id), req.user.id));
 }));
 
@@ -358,12 +361,14 @@ r.post('/highlights/:id/cover', imageUpload.single('cover'), h((req, res) => {
   const hl = ownHighlight(req.params.id, req.user.id);
   if (!req.file) fail(400, 'Choose an image.');
   run('UPDATE highlights SET cover_image = ?, cover_emoji = NULL WHERE id = ?', fileUrl(req.file), hl.id);
+  deleteStoredFiles(hl.cover_image);
   res.json(highlightOut(get('SELECT * FROM highlights WHERE id = ?', hl.id), req.user.id));
 }));
 
 r.delete('/highlights/:id', h((req, res) => {
   const hl = ownHighlight(req.params.id, req.user.id);
   run('DELETE FROM highlights WHERE id = ?', hl.id);
+  deleteStoredFiles(hl.cover_image);
   res.json({ ok: true });
 }));
 
