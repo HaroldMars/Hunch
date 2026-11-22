@@ -93,7 +93,7 @@ function Layout() {
 function Root() {
   const { booting, session, setSession, ready, logout } = useAdmin();
   const [settings, setSettings] = useState({});
-  useEffect(() => { api('/auth/public-settings').then(setSettings).catch(() => {}); }, []);
+  useEffect(() => { api('/auth/public-settings').then((s) => setSettings(s || {})).catch(() => {}); }, []);
   if (booting) return <Spinner />;
   if (!session) {
     return <LoginScreen api={api} appKind="admin" otherAppUrl={CLIENT_URL} settings={settings}

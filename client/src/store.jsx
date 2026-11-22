@@ -58,7 +58,7 @@ export function AppProvider({ children }) {
       if (status === 401) logout();
       else refreshMe(); // 428: onboarding step required
     });
-    api('/auth/public-settings').then(setSettings).catch(() => {});
+    api('/auth/public-settings').then((s) => s && setSettings(s)).catch(() => {});
     refreshMe().finally(() => setBooting(false));
   }, [logout, refreshMe]);
 
