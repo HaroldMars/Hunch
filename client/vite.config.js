@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
-const api = process.env.VITE_DEV_API || 'http://localhost:5000';
+const api = process.env.VITE_DEV_API || 'http://localhost:5050';
 export default defineConfig({
   plugins: [react()],
   base: process.env.NODE_ENV === 'production' ? '/' : '/',

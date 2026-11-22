@@ -1,7 +1,8 @@
 // Runtime configuration, read once from the environment (.env locally, host env vars in production).
 // Nothing secret lives in the code: see backend/.env.example for every variable.
 export const IS_PROD = process.env.NODE_ENV === 'production';
-export const PORT = Number(process.env.PORT) || 5000;
+// Local default is 5050: on macOS, port 5000 is taken by the AirPlay Receiver. Hosts set PORT themselves.
+export const PORT = Number(process.env.PORT) || 5050;
 
 const list = (v) => String(v || '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
 export const CLIENT_URL = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -24,7 +25,10 @@ export const CLOUDINARY = {
   secret: process.env.CLOUDINARY_API_SECRET || '',
   folder: process.env.CLOUDINARY_FOLDER || 'hunch',
 };
-export const cloudinaryEnabled = () => !!(CLOUDINARY.cloud && CLOUDINARY.key && CLOUDINARY.secret);
+// Local testing never touches real services: Cloudinary and SMTP only run in production,
+// unless USE_REAL_SERVICES=1 is set deliberately for a one-off check.
+export const REAL_SERVICES = IS_PROD || process.env.USE_REAL_SERVICES === '1';
+export const cloudinaryEnabled = () => REAL_SERVICES && !!(CLOUDINARY.cloud && CLOUDINARY.key && CLOUDINARY.secret);
 
 if (IS_PROD) {
   const missing = ['JWT_SECRET', 'CLIENT_URL', 'ADMIN_URL'].filter((k) => !process.env[k]);

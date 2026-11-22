@@ -4,9 +4,13 @@
 |---|---|---|---|---|
 | Client app | `client/` | https://app.hunch.ph | http://localhost:5173 | Vercel project `hunch-client` |
 | Admin dashboard | `admin/` | https://admin.hunch.ph | http://localhost:3000 | Vercel project `hunch-admin` |
-| Backend API | `backend/` | https://api.hunch.ph | http://localhost:5000 | Persistent Node host (see below) |
+| Backend API | `backend/` | https://api.hunch.ph | http://localhost:5050 | Persistent Node host (see below) |
 
 The client and admin never talk to each other. Both call the backend API only.
+
+Local testing never uses production services: outside production, uploads go to `backend/uploads`, emails are printed in the terminal instead of sent, and the local database has its own test accounts. Production keys live only in the host's settings.
+
+Locally the API runs on port 5050, because macOS uses port 5000 for the AirPlay Receiver. In production the host sets `PORT`.
 
 ## 1. Client and admin on Vercel
 Create two Vercel projects from the GitHub repository:
