@@ -210,7 +210,7 @@ function About({ p, mine }) {
   const friends = useLoad(() => api(`/users/${p.id}/friends`), [p.id]);
   const rows = [
     ['star', 'Job title', p.job_title], ['globe', 'Location', p.location], ['shield', 'Role', ROLE_LABELS[p.role]],
-    ['users', 'Team', p.team_leader ? `Team ${p.team_leader.full_name}` : null], ['link', 'User ID', p.user_code],
+    ['users', 'Team', p.team_leader ? (p.team_name || `Team ${p.team_leader.full_name}`) : null], ['link', 'User ID', p.user_code],
     ['calendar', 'Joined', new Date(p.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })],
     [p.privacy === 'public' ? 'globe' : 'lock', 'Profile', p.privacy === 'public' ? 'Public' : 'Friends only'],
   ].filter((r) => r[2]);

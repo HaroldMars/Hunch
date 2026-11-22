@@ -7,7 +7,7 @@ import { notify } from '../notify.js';
 import { hydratePosts, hydratePost } from './posts.js';
 import { POSITIVE, LOW_ENERGY, NEGATIVE } from '../analytics.js';
 import {
-  teamOf, isOverseer, allTeams, teamLeader, canAccessTeam, canManageTeam, canPostInTeam, teamSettings, postPermission, teamMemberIds, resolveTeam,
+  teamOf, isOverseer, allTeams, teamLeader, canAccessTeam, canManageTeam, canPostInTeam, teamSettings, postPermission, teamMemberIds, resolveTeam, teamName, teamRow,
 } from '../teams.js';
 
 const r = Router();
@@ -27,7 +27,7 @@ function team(req, source = req.query) {
 const mustManage = (req, t) => { if (!canManageTeam(req.user, t)) fail(403, 'Only the team leader can do that.'); };
 const teamOut = (t) => {
   const tl = teamLeader(t);
-  return tl && { id: tl.id, name: `Team ${tl.full_name.split(' ')[0]}`, leader: publicUser(tl.id), members: teamMemberIds(t).length };
+  return tl && { id: tl.id, name: teamName(t), color: teamRow(t)?.color || null, leader: publicUser(tl.id), members: teamMemberIds(t).length };
 };
 const fanout = (teamId, exceptId, payload) => teamMemberIds(teamId).filter((id) => id !== exceptId).forEach((uid) => notify({ ...payload, userId: uid }));
 

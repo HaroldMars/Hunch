@@ -23,6 +23,7 @@ import storyRoutes from './routes/stories.js';
 import chatRoutes from './routes/chats.js';
 import notificationRoutes from './routes/notifications.js';
 import adminRoutes from './routes/admin.js';
+import teamRoutes from './routes/teams.js';
 import mapRoutes from './routes/map.js';
 import workRoutes from './routes/work.js';
 
@@ -52,6 +53,7 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
+app.use('/api/admin/teams', teamRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', userRoutes);

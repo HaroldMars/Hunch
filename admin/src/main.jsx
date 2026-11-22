@@ -14,6 +14,7 @@ import Email from './pages/Email.jsx';
 import Notifications from './pages/Notifications.jsx';
 import Registration from './pages/Registration.jsx';
 import Users, { Admins } from './pages/Users.jsx';
+import Teams, { TeamView } from './pages/Teams.jsx';
 import Settings, { Account } from './pages/Settings.jsx';
 import './styles.css';
 
@@ -26,6 +27,7 @@ const NAV = [
   { to: '/email', mod: 'email', icon: 'mail', label: 'Email', count: 'email' },
   { to: '/notifications', mod: 'notifications', icon: 'bell', label: 'Notifications', count: 'notif' },
   { to: '/register', mod: 'register', icon: 'userPlus', label: 'Registration' },
+  { to: '/teams', mod: 'teams', icon: 'layers', label: 'Team Management', staffLabel: 'My Team' },
   { to: '/users', mod: 'users', icon: 'users', label: 'User Management' },
   { to: '/admins', mod: 'admins', icon: 'shield', label: 'Admin Management' },
   { to: '/settings', mod: 'settings', icon: 'settings', label: 'System Settings' },
@@ -47,7 +49,7 @@ function Layout() {
         <div className="brand"><Logo size={30} /><div>Hunch<small>Admin Dashboard</small></div></div>
         {items.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.to === '/'} className="nav-item">
-            <Icon name={n.icon} size={19} /> {n.label}
+            <Icon name={n.icon} size={19} /> {n.staffLabel && ['tl', 'sme'].includes(user.role) ? n.staffLabel : n.label}
             {n.count === 'notif' && unread > 0 && <span className="count">{unread > 99 ? '99+' : unread}</span>}
             {n.count === 'email' && emailUnread > 0 && <span className="count">{emailUnread}</span>}
           </NavLink>
@@ -78,6 +80,8 @@ function Layout() {
             {can('email') && <Route path="/email" element={<Email />} />}
             {can('notifications') && <Route path="/notifications" element={<Notifications />} />}
             {can('register') && <Route path="/register" element={<Registration />} />}
+            {can('teams') && <Route path="/teams" element={<Teams />} />}
+            {can('teams') && <Route path="/teams/:id" element={<TeamView />} />}
             {can('users') && <Route path="/users" element={<Users />} />}
             {can('admins') && <Route path="/admins" element={<Admins />} />}
             {can('settings') && <Route path="/settings" element={<Settings />} />}
