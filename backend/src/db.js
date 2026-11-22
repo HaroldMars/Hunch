@@ -542,3 +542,30 @@ if (process.env.ADMIN_RECOVERY === '1') {
     }
   }
 }
+
+// ---------- v0.5: named teams ----------
+// A team still belongs to its team leader: members link to it through users.team_leader_id, and the Work feed,
+// schedules and reports key on the TL's id. This table adds the team's own details on top.
+db.exec(`
+CREATE TABLE IF NOT EXISTS teams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  tl_id INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+  sme_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  description TEXT NOT NULL DEFAULT '',
+  color TEXT NOT NULL DEFAULT '#5B8DEF',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT ${NOW}
+);
+`);
+// Once: give every existing team leader a named team, so current teams keep working.
+if (getSetting('teams_migrated') !== '1') {
+  tx(() => {
+    for (const tl of all("SELECT id, full_name, created_at FROM users WHERE role = 'tl' AND id NOT IN (SELECT tl_id FROM teams WHERE tl_id IS NOT NULL)")) {
+      const sme = get("SELECT id FROM users WHERE role = 'sme' AND team_leader_id = ? ORDER BY id LIMIT 1", tl.id);
+      run('INSERT INTO teams (name, tl_id, sme_id, created_at) VALUES (?, ?, ?, ?)', `Team ${tl.full_name.split(' ')[0]}`, tl.id, sme?.id ?? null, tl.created_at);
+    }
+    setSetting('teams_migrated', '1');
+  });
+}

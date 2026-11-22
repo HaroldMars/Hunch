@@ -149,9 +149,11 @@ r.get('/accounts/options', h((req, res) => {
   const scope = teamScope(req.user);
   res.json({
     roles: creatableRoles(req.user),
+    // Each option is a team, identified by its team leader's id (members link to the TL).
     teamLeaders: scope !== null
-      ? all("SELECT id, full_name, user_code FROM users WHERE id = ? AND role = 'tl'", scope)
-      : all("SELECT id, full_name, user_code FROM users WHERE role = 'tl' AND status = 'active' ORDER BY full_name"),
+      ? all("SELECT u.id, u.full_name, u.user_code, t.name team_name FROM users u LEFT JOIN teams t ON t.tl_id = u.id WHERE u.id = ? AND u.role = 'tl'", scope)
+      : all(`SELECT u.id, u.full_name, u.user_code, t.name team_name FROM teams t JOIN users u ON u.id = t.tl_id
+             WHERE t.status = 'active' AND u.role = 'tl' AND u.status = 'active' ORDER BY t.name COLLATE NOCASE`),
   });
 }));
 
@@ -181,6 +183,7 @@ function createAccount(creator, body) {
       username, email, bcrypt.hashSync(temp, 10), full_name, role, tl, String(body.job_title || ROLE_LABELS[role]).slice(0, 80), creator.id
     ).lastInsertRowid);
     run('UPDATE users SET user_code = ? WHERE id = ?', codeFor(id), id);
+    if (role === 'sme' && tl) run('UPDATE teams SET sme_id = ? WHERE tl_id = ? AND sme_id IS NULL', id, tl);
     return id;
   });
   notifyStaff({
@@ -269,6 +272,9 @@ r.patch('/users/:id', requireModule('users'), h((req, res) => {
     }
   }
   if (sets.length) run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, ...vals, target.id);
+  // Keep team assignments consistent when someone stops being a TL or SME.
+  if (target.role === 'tl' && newRole !== 'tl') run('UPDATE teams SET tl_id = NULL WHERE tl_id = ?', target.id);
+  if (target.role === 'sme' && newRole !== 'sme') run('UPDATE teams SET sme_id = NULL WHERE sme_id = ?', target.id);
   res.json(get(`SELECT ${STAFF_COLS} FROM users WHERE id = ?`, target.id));
 }));
 

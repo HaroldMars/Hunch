@@ -32,7 +32,7 @@ export default function Registration() {
     } catch (ex) { setErr(ex.message); } finally { setBusy(false); }
   };
   const approve = (r) => {
-    const tl = opts.data?.teamLeaders.find((t) => r.team_leader && t.full_name.toLowerCase().includes(r.team_leader.toLowerCase()));
+    const tl = opts.data?.teamLeaders.find((t) => r.team_leader && `${t.full_name} ${t.team_name || ''}`.toLowerCase().includes(r.team_leader.toLowerCase()));
     setF({ ...blank, full_name: r.full_name, email: r.email, role: roles.includes(r.requested_role) ? r.requested_role : roles[0], team_leader_id: tl?.id || '' });
     setRequestId(r.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -59,10 +59,10 @@ export default function Registration() {
               </div>
               {needsTeam && (
                 <>
-                  <label className="label">Team leader</label>
+                  <label className="label">Assign team</label>
                   <select className="select input" value={f.team_leader_id} onChange={set('team_leader_id')} disabled={scoped}>
                     {!scoped && <option value="">Unassigned</option>}
-                    {opts.data.teamLeaders.map((t) => <option key={t.id} value={t.id}>{t.full_name} ({t.user_code})</option>)}
+                    {opts.data.teamLeaders.map((t) => <option key={t.id} value={t.id}>{t.team_name || `Team ${t.full_name.split(' ')[0]}`} · TL {t.full_name}</option>)}
                   </select>
                 </>
               )}
