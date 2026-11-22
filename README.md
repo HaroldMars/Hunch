@@ -15,10 +15,19 @@ hunch/
 ## Run locally
 Requires Node 22.13 or newer.
 
+The backend runs in its own terminal tab, separate from the two web apps:
+
 ```bash
-npm install
-npm run dev          # backend :5050, client :5173, admin :3000
+npm install                 # once
+
+# Terminal tab 1: backend API on http://localhost:5050
+cd backend && npm run dev   # (or from the project folder: npm run dev:backend)
+
+# Terminal tab 2: client on http://localhost:5173 and admin on http://localhost:3000
+npm run dev                 # (or one at a time: npm run dev:client / npm run dev:admin)
 ```
+
+Start the backend first; the web apps forward their API calls to it.
 
 Local testing is fully separate from production:
 - `backend/.env` holds **test-only** settings (no production keys). Uploads stay in `backend/uploads`, sessions use a local secret, and no real emails are sent: verification codes and emails are printed in the terminal.
