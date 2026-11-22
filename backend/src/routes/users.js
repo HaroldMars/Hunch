@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import { get, all, run, userSettings, DEFAULT_USER_SETTINGS, UPLOAD_DIR } from '../db.js';
 import { auth } from '../auth.js';
 import {
-  h, fail, imageUpload, fileUrl, PUBLIC_COLS, publicUser, selfUser, friendshipBetween, friendIds, canViewProfile, areFriends, isBlocked, blockedIds,
+  h, fail, imageUpload, fileUrl, deleteStoredFiles, PUBLIC_COLS, publicUser, selfUser, friendshipBetween, friendIds, canViewProfile, areFriends, isBlocked, blockedIds,
 } from '../util.js';
 import { notify, notifyStaff } from '../notify.js';
 import { sessionPayload } from './auth.js';
@@ -86,11 +86,13 @@ r.patch('/users/me', h((req, res) => {
 r.post('/users/me/avatar', imageUpload.single('avatar'), h((req, res) => {
   if (!req.file) fail(400, 'Choose an image.');
   run('UPDATE users SET avatar = ? WHERE id = ?', fileUrl(req.file), req.user.id);
+  deleteStoredFiles(req.user.avatar); // the previous photo is deleted permanently
   res.json(selfUser(get('SELECT * FROM users WHERE id = ?', req.user.id)));
 }));
 
 r.delete('/users/me/avatar', h((req, res) => {
   run('UPDATE users SET avatar = NULL WHERE id = ?', req.user.id);
+  deleteStoredFiles(req.user.avatar);
   res.json(selfUser(get('SELECT * FROM users WHERE id = ?', req.user.id)));
 }));
 

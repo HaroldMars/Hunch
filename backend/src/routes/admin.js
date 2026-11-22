@@ -4,7 +4,7 @@ import { MOOD_KEYS, ROLE_LABELS } from '../../../shared/constants.js';
 import { get, all, run, tx, getSetting, setSetting, DEFAULT_SETTINGS, codeFor } from '../db.js';
 import { auth, requireModule, creatableRoles, manageableRoles, teamScope, modulesFor } from '../auth.js';
 import { sendWelcome, sendPasswordReset, mailEnabled } from '../mailer.js';
-import { h, fail, randomPassword, nowIso, localDay, fileUpload, fileUrl, selfUser } from '../util.js';
+import { h, fail, randomPassword, nowIso, localDay, attachmentUpload, fileUrl, selfUser, deleteStoredFiles, attachmentUrls } from '../util.js';
 import { notify, notifyStaff } from '../notify.js';
 import { statistics, teamReport, normalizeRange, dailySummary } from '../analytics.js';
 import { deliverEmail } from '../email.js';
@@ -401,7 +401,7 @@ const parseList = (v) => {
  * Compose: action = send | draft | schedule. Multipart so attachments can be added.
  * Existing attachments (from a draft) are passed back in `keep_attachments`.
  */
-r.post('/email', requireModule('email'), fileUpload.array('attachments', 10), h((req, res) => {
+r.post('/email', requireModule('email'), attachmentUpload.array('attachments', 10), h((req, res) => {
   const b = req.body || {};
   const action = ['send', 'draft', 'schedule'].includes(b.action) ? b.action : 'send';
   const to = parseList(b.to).map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -449,7 +449,10 @@ r.post('/email/:id/cancel-schedule', requireModule('email'), h((req, res) => {
 r.delete('/email/:id', requireModule('email'), h((req, res) => {
   const e = get('SELECT * FROM emails WHERE id = ? AND owner_id = ?', Number(req.params.id), req.user.id);
   if (!e) fail(404, 'Email not found.');
-  if (e.folder === 'trash' || e.folder === 'drafts') run('DELETE FROM emails WHERE id = ?', e.id);
+  if (e.folder === 'trash' || e.folder === 'drafts') {
+    run('DELETE FROM emails WHERE id = ?', e.id);
+    deleteStoredFiles(attachmentUrls(e.attachments)); // kept while any other copy of the email still has it
+  }
   else run("UPDATE emails SET folder = 'trash' WHERE id = ?", e.id);
   res.json({ ok: true });
 }));

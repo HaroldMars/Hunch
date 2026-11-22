@@ -519,7 +519,14 @@ if (!get("SELECT id FROM users WHERE role = 'developer' LIMIT 1")) {
 // Admin recovery (locked out of production): set ADMIN_RECOVERY=1 together with INITIAL_ADMIN_EMAIL and
 // INITIAL_ADMIN_PASSWORD on the host, then redeploy. That account is reset (or created) as an active developer
 // with that password, and must change it at sign-in. Remove ADMIN_RECOVERY again right after.
-if (process.env.ADMIN_RECOVERY === '1') {
+// It runs ONCE per email + password: later restarts and updates never touch the account again, even if the
+// variable is left on. To recover again, set a different INITIAL_ADMIN_PASSWORD.
+const recoveryKey = () => crypto.createHash('sha256')
+  .update(`${String(process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase()}\n${process.env.INITIAL_ADMIN_PASSWORD || ''}`).digest('hex');
+if (process.env.ADMIN_RECOVERY === '1' && getSetting('admin_recovery_done') === recoveryKey()) {
+  console.log('[hunch] ADMIN_RECOVERY is still set but was already used, so the account was left alone. Remove ADMIN_RECOVERY from the host.');
+} else if (process.env.ADMIN_RECOVERY === '1') {
+  setSetting('admin_recovery_done', recoveryKey());
   const email = String(process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();
   const password = process.env.INITIAL_ADMIN_PASSWORD || '';
   if (!email || password.length < 8) {
@@ -568,4 +575,11 @@ if (getSetting('teams_migrated') !== '1') {
     }
     setSetting('teams_migrated', '1');
   });
+}
+
+// Railway: without a volume the database is wiped on every update (all accounts, posts and passwords reset).
+if (process.env.NODE_ENV === 'production' && process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+  console.warn('[hunch] WARNING: no Railway volume is attached. The database is erased on every deploy. Attach a volume at /data.');
+} else if (process.env.RAILWAY_VOLUME_MOUNT_PATH && path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH) !== DATA_DIR) {
+  console.warn(`[hunch] WARNING: the Railway volume is mounted at ${process.env.RAILWAY_VOLUME_MOUNT_PATH} but the database is saved in ${DATA_DIR}. Mount the volume at ${DATA_DIR} (or set DATA_DIR) or data is lost on every deploy.`);
 }

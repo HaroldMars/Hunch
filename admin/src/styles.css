@@ -316,3 +316,10 @@ tbody tr.tm-group:hover td { background: var(--panel-2); }
 .tm-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .tm-line { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; min-width: 0; }
 .tm-clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* Phones: no zooming in when tapping a field or double-tapping.
+   iOS zooms into any text field under 16px, so fields use 16px on touch screens. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+@media (hover: none) and (pointer: coarse) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
+}

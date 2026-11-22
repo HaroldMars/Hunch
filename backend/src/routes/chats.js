@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { get, all, run, tx, userSettings } from '../db.js';
 import { auth } from '../auth.js';
-import { h, fail, imageUpload, fileUpload, fileUrl, publicUser, areFriends, isBlocked, nowIso, localDay, addDays, canViewProfile } from '../util.js';
+import { h, fail, imageUpload, fileUpload, fileUrl, deleteStoredFiles, attachmentUrls, publicUser, areFriends, isBlocked, nowIso, localDay, addDays, canViewProfile } from '../util.js';
 import { emitToUsers, isOnline } from '../realtime.js';
 import { notifyMessage } from '../notify.js';
 import { hydratePost } from './posts.js';
@@ -223,6 +223,7 @@ r.post('/conversations/:id/photo', imageUpload.single('photo'), h((req, res) => 
   const { conv } = requireGroupAdmin(req.params.id, req.user.id);
   if (!req.file) fail(400, 'Choose an image.');
   run('UPDATE conversations SET photo = ? WHERE id = ?', fileUrl(req.file), conv.id);
+  deleteStoredFiles(conv.photo);
   postMessage({ conversationId: conv.id, sender: req.user, text: `${req.user.full_name} changed the group photo`, kind: 'system' });
   emitToUsers(memberIds(conv.id), 'conversation:update', { id: conv.id });
   res.json(conversationOut(get('SELECT * FROM conversations WHERE id = ?', conv.id), req.user.id));
@@ -255,7 +256,11 @@ r.delete('/conversations/:id/members/:userId', h((req, res) => {
   // Keep at least one admin.
   const left = all('SELECT * FROM conversation_members WHERE conversation_id = ? ORDER BY joined_at', conv.id);
   if (left.length && !left.some((m) => m.role === 'admin')) run("UPDATE conversation_members SET role = 'admin' WHERE conversation_id = ? AND user_id = ?", conv.id, left[0].user_id);
-  if (!left.length) run('DELETE FROM conversations WHERE id = ?', conv.id);
+  if (!left.length) {
+    const msgs = all('SELECT image, attachment FROM messages WHERE conversation_id = ? AND (image IS NOT NULL OR attachment IS NOT NULL)', conv.id);
+    run('DELETE FROM conversations WHERE id = ?', conv.id);
+    deleteStoredFiles(conv.photo, msgs.map((x) => x.image), msgs.map((x) => attachmentUrls(x.attachment)));
+  }
   emitToUsers(before, 'conversation:update', { id: conv.id });
   res.json({ ok: true });
 }));
@@ -376,7 +381,8 @@ r.post('/messages/:id/react', h((req, res) => {
 r.delete('/messages/:id', h((req, res) => {
   const m = ownMessage(req.params.id, req.user.id);
   if (m.sender_id !== req.user.id) fail(403, 'You can only unsend your own messages.');
-  run('UPDATE messages SET deleted = 1, pinned = 0 WHERE id = ?', m.id);
+  run('UPDATE messages SET deleted = 1, pinned = 0, image = NULL, attachment = NULL WHERE id = ?', m.id);
+  deleteStoredFiles(m.image, attachmentUrls(m.attachment)); // unsent photos and files are deleted permanently
   broadcastUpdate(m);
   res.json({ ok: true });
 }));
