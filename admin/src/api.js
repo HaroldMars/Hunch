@@ -46,7 +46,16 @@ export async function api(path, { method = 'GET', body, form } = {}) {
     headers['Content-Type'] = 'application/json';
     payload = JSON.stringify(body);
   }
-  const res = await fetch(`${API_BASE}/api${path}`, { method, headers, body: payload });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/api${path}`, { method, headers, body: payload });
+  } catch {
+    throw new ApiError(0, 'Can’t reach the Hunch server. Check your connection and try again.');
+  }
+  // A non-JSON reply means we reached a web page, not the API (e.g. VITE_API_URL is missing in production).
+  if (!(res.headers.get('content-type') || '').includes('application/json') && res.status !== 204) {
+    throw new ApiError(res.status || 502, 'Can’t reach the Hunch server right now. Please try again later.');
+  }
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
   if (!res.ok) {

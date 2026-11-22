@@ -515,3 +515,30 @@ if (!get("SELECT id FROM users WHERE role = 'developer' LIMIT 1")) {
   run('UPDATE users SET user_code = ? WHERE id = ?', codeFor(Number(r.lastInsertRowid)), Number(r.lastInsertRowid));
   console.log(`[hunch] Created the first developer account "${username}".${generated ? ` Temporary password: ${password}  (shown once; change it on first sign-in)` : ''}`);
 }
+
+// Admin recovery (locked out of production): set ADMIN_RECOVERY=1 together with INITIAL_ADMIN_EMAIL and
+// INITIAL_ADMIN_PASSWORD on the host, then redeploy. That account is reset (or created) as an active developer
+// with that password, and must change it at sign-in. Remove ADMIN_RECOVERY again right after.
+if (process.env.ADMIN_RECOVERY === '1') {
+  const email = String(process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = process.env.INITIAL_ADMIN_PASSWORD || '';
+  if (!email || password.length < 8) {
+    console.warn('[hunch] ADMIN_RECOVERY is set but INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD (8+ chars) are missing. Nothing changed.');
+  } else {
+    const username = process.env.INITIAL_ADMIN_USERNAME || null;
+    const existing = get('SELECT id FROM users WHERE email = ? OR (username IS NOT NULL AND username = ?)', email, username);
+    if (existing) {
+      run(`UPDATE users SET password_hash = ?, role = 'developer', status = 'active', must_change_password = 1, verified = 1 WHERE id = ?`,
+        bcrypt.hashSync(password, 10), existing.id);
+      console.log(`[hunch] ADMIN_RECOVERY: reset the password for ${email}. Remove ADMIN_RECOVERY from the host now.`);
+    } else {
+      const r = run(
+        `INSERT INTO users (username, email, password_hash, full_name, role, must_change_password, verified, job_title)
+         VALUES (?, ?, ?, ?, 'developer', 1, 1, 'System Developer')`,
+        username, email, bcrypt.hashSync(password, 10), process.env.INITIAL_ADMIN_NAME || 'Hunch Admin'
+      );
+      run('UPDATE users SET user_code = ? WHERE id = ?', codeFor(Number(r.lastInsertRowid)), Number(r.lastInsertRowid));
+      console.log(`[hunch] ADMIN_RECOVERY: created developer account ${email}. Remove ADMIN_RECOVERY from the host now.`);
+    }
+  }
+}

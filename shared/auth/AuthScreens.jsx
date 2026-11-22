@@ -142,7 +142,8 @@ const GoogleG = () => (
  * signed in to — every role has a Hunch app account. The only hand-over is an agent signing
  * in on the dashboard, which they have no access to, so they're sent to the Hunch app.
  */
-export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings = {} }) {
+export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: settingsIn }) {
+  const settings = settingsIn || {}; // never crash if the server couldn't be reached
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
