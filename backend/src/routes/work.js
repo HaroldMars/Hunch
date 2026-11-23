@@ -7,7 +7,7 @@ import { notify } from '../notify.js';
 import { hydratePosts, hydratePost } from './posts.js';
 import { POSITIVE, LOW_ENERGY, NEGATIVE } from '../analytics.js';
 import {
-  teamOf, isOverseer, allTeams, teamLeader, canAccessTeam, canManageTeam, canPostInTeam, teamSettings, postPermission, teamMemberIds, resolveTeam, teamName, teamRow,
+  teamOf, isOverseer, workTeams, teamLeader, canAccessTeam, canManageTeam, canPostInTeam, teamSettings, postPermission, teamMemberIds, resolveTeam, teamName, teamRow,
 } from '../teams.js';
 
 const r = Router();
@@ -20,14 +20,17 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function team(req, source = req.query) {
   const t = resolveTeam(req.user, source?.team);
-  if (!t) fail(404, isOverseer(req.user) ? 'There are no teams yet.' : 'You are not assigned to a team yet. Ask your manager to add you to one.');
+  if (!t) fail(404, isOverseer(req.user) ? 'You don’t supervise any team yet. Ask a developer to assign teams to you in Team Management.' : 'You are not assigned to a team yet. Ask your manager to add you to one.');
   if (!canAccessTeam(req.user, t)) fail(403, 'You can only see your own team’s workspace.');
   return t;
 }
 const mustManage = (req, t) => { if (!canManageTeam(req.user, t)) fail(403, 'Only the team leader can do that.'); };
 const teamOut = (t) => {
   const tl = teamLeader(t);
-  return tl && { id: tl.id, name: teamName(t), color: teamRow(t)?.color || null, leader: publicUser(tl.id), members: teamMemberIds(t).length };
+  const row = teamRow(t);
+  const sme = row?.sme_id ? publicUser(row.sme_id) : null;
+  const manager = row?.manager_id ? publicUser(row.manager_id) : null;
+  return tl && { id: tl.id, name: teamName(t), color: row?.color || null, department: row?.department || null, leader: publicUser(tl.id), sme, manager, members: teamMemberIds(t).length };
 };
 const fanout = (teamId, exceptId, payload) => teamMemberIds(teamId).filter((id) => id !== exceptId).forEach((uid) => notify({ ...payload, userId: uid }));
 
@@ -39,7 +42,7 @@ r.get('/work/context', h((req, res) => {
   const s = teamSettings(t);
   res.json({
     team: teamOut(t),
-    teams: overseer ? allTeams().map((x) => teamOut(x.id)) : null,
+    teams: overseer ? workTeams(req.user).map((x) => teamOut(x.id)) : null,
     overseer,
     canManage: canManageTeam(req.user, t),
     canPost: canPostInTeam(req.user, t),

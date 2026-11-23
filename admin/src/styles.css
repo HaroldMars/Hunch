@@ -323,3 +323,6 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 @media (hover: none) and (pointer: coarse) {
   input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
 }
+
+/* Team detail: five info cards (team, manager, TL, SME, members). */
+.grid.tm-infos { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }

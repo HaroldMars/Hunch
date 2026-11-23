@@ -36,12 +36,17 @@ const Wellbeing = ({ pct, total }) => (!total ? <span className="muted">-</span>
 
 // ---------- create / edit ----------
 function TeamForm({ team, onClose, onSaved }) {
-  const { toast } = useAdmin();
+  const { toast, user } = useAdmin();
   const opts = useLoad(() => api('/admin/teams/options'), []);
   const [f, setF] = useState({
     name: team?.name || '', tl_id: team?.tl_id || '', sme_id: team?.sme_id || '', description: team?.description || '',
     color: team?.color || TEAM_COLORS[0], status: team?.status || 'active',
+    manager_id: team ? team.manager_id || '' : undefined, department: team?.department || 'Social Media',
   });
+  // A new team created by a manager defaults to that manager.
+  useEffect(() => {
+    if (!team && f.manager_id === undefined && opts.data) setF((x) => ({ ...x, manager_id: opts.data.managers?.some((m) => m.id === user.id) ? user.id : '' }));
+  }, [opts.data]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -53,7 +58,7 @@ function TeamForm({ team, onClose, onSaved }) {
   const save = async () => {
     setErr(''); setBusy(true);
     try {
-      const body = { ...f, tl_id: Number(f.tl_id) || null, sme_id: Number(f.sme_id) || null };
+      const body = { ...f, tl_id: Number(f.tl_id) || null, sme_id: Number(f.sme_id) || null, manager_id: Number(f.manager_id) || null };
       const r = team ? await api(`/admin/teams/${team.id}`, { method: 'PATCH', body }) : await api('/admin/teams', { method: 'POST', body });
       toast(team ? 'Team updated' : `${r.team.name} created`, 'success');
       onSaved(r.team);
@@ -66,6 +71,20 @@ function TeamForm({ team, onClose, onSaved }) {
     </>}>
       {opts.loading ? <Spinner /> : (
         <>
+          <div className="grid g2" style={{ gap: 12 }}>
+            <div>
+              <label className="label">Department</label>
+              <input className="input" list="tm-departments" value={f.department} onChange={set('department')} maxLength={60} placeholder="e.g. Social Media" />
+              <datalist id="tm-departments">{(opts.data?.departments || []).map((d) => <option key={d} value={d} />)}</datalist>
+            </div>
+            <div>
+              <label className="label">Supervising manager</label>
+              <select className="select input" value={f.manager_id ?? ''} onChange={set('manager_id')}>
+                <option value="">No manager yet</option>
+                {(opts.data?.managers || []).map((m) => <option key={m.id} value={m.id}>{m.full_name} ({m.user_code})</option>)}
+              </select>
+            </div>
+          </div>
           <label className="label">Assigned team leader</label>
           <select className="select input" value={f.tl_id} onChange={pickTl}>
             <option value="">Choose a team leader…</option>
@@ -168,6 +187,7 @@ function OrgChart({ team, onOpen }) {
   const otherSmes = smes.filter((s) => s.id !== team.sme_id);
   return (
     <div className="tm-org" style={{ '--team': team.color }}>
+      {team.manager && <><div className="tm-level"><Person u={team.manager} onOpen={onOpen} tag={`Manager · ${team.department || 'Department'}`} /></div><div className="tm-stem" /></>}
       <div className="tm-level"><Person u={tl} onOpen={onOpen} tag="Team Leader" /></div>
       <div className="tm-stem" />
       <div className="tm-level">
@@ -345,11 +365,12 @@ function TeamCard({ t }) {
         <div className="tm-mark">{t.name.replace(/^team\s+/i, '').slice(0, 1).toUpperCase()}</div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h3>{t.name}</h3>
-          <div className="small muted">{t.counts.total} member{t.counts.total === 1 ? '' : 's'} · since {new Date(t.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</div>
+          <div className="small muted">{t.department ? `${t.department} · ` : ''}{t.counts.total} member{t.counts.total === 1 ? '' : 's'} · since {new Date(t.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</div>
         </div>
         {t.status === 'archived' && <span className="tag">Archived</span>}
       </div>
       <div className="tm-roles">
+        <div><span>Manager</span>{t.manager ? <><Avatar user={t.manager} size={22} /> {t.manager.full_name}</> : <i className="muted">Not assigned</i>}</div>
         <div><span>TL</span>{t.tl ? <><Avatar user={t.tl} size={22} /> {t.tl.full_name}</> : <i className="muted">Not assigned</i>}</div>
         <div><span>SME</span>{t.sme ? <><Avatar user={t.sme} size={22} /> {t.sme.full_name}</> : <i className="muted">Not assigned</i>}</div>
         <div><span>Agents</span><b>{t.counts.agents}</b></div>
@@ -421,8 +442,9 @@ export function TeamView() {
       </PageHead>
       {t.status === 'archived' && <div className="tm-callout"><Icon name="layers" size={18} /> This team is archived. Restore it to assign people again.</div>}
 
-      <div className="grid g4" style={{ marginBottom: 16 }}>
+      <div className="grid g4 tm-infos" style={{ marginBottom: 16 }}>
         <div className="card tm-info" style={{ '--team': t.color }}><span>Team</span><b><Dot color={t.color} /> {t.name}</b><small>Created {fmtDate(t.created_at)}</small></div>
+        <div className="card tm-info"><span>Manager</span><b>{t.manager?.full_name || '—'}</b><small>{t.department || 'No department'}</small></div>
         <div className="card tm-info"><span>Team leader</span><b>{t.tl?.full_name || '—'}</b><small>{t.tl?.user_code || 'Not assigned'}</small></div>
         <div className="card tm-info"><span>SME</span><b>{t.sme?.full_name || '—'}</b><small>{t.sme?.user_code || 'Not assigned'}</small></div>
         <div className="card tm-info"><span>Total members</span><b>{t.counts.total}</b><small>{t.counts.smes} SME · {t.counts.agents} agents</small></div>

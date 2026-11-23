@@ -275,6 +275,7 @@ r.patch('/users/:id', requireModule('users'), h((req, res) => {
   // Keep team assignments consistent when someone stops being a TL or SME.
   if (target.role === 'tl' && newRole !== 'tl') run('UPDATE teams SET tl_id = NULL WHERE tl_id = ?', target.id);
   if (target.role === 'sme' && newRole !== 'sme') run('UPDATE teams SET sme_id = NULL WHERE sme_id = ?', target.id);
+  if (target.role === 'manager' && newRole !== 'manager') run('UPDATE teams SET manager_id = NULL WHERE manager_id = ?', target.id);
   res.json(get(`SELECT ${STAFF_COLS} FROM users WHERE id = ?`, target.id));
 }));
 

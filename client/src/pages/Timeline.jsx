@@ -56,6 +56,17 @@ export default function Timeline() {
   const [creating, setCreating] = useState(false);
   const [composing, setComposing] = useState(false);
   const [hideComposer, setHideComposer] = useState(false);
+  // The Work tab only exists for people on a team (or managers supervising one). Re-checked whenever the
+  // page regains focus, so a new assignment adds the tab and a removal takes it (and its content) away.
+  const [hasWork, setHasWork] = useState(null);
+  useEffect(() => {
+    const check = () => api('/work/context').then((c) => setHasWork(!!c?.team)).catch(() => setHasWork(false));
+    check();
+    const onVis = () => document.visibilityState === 'visible' && check();
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  useEffect(() => { if (hasWork === false && tab === 'work') setTab('foryou'); }, [hasWork, tab]);
 
   // Smart posting bar: hides while scrolling down, slides back in when scrolling up.
   useEffect(() => {
@@ -107,11 +118,11 @@ export default function Timeline() {
       <div className="smart-spacer" />
       {settings.maintenance_banner && <div className="banner"><Icon name="megaphone" size={18} /> {settings.maintenance_banner}</div>}
       <div className="tabs" role="tablist" style={{ justifyContent: 'center', gap: 40 }}>
-        {[['foryou', 'For you'], ['friends', 'Friends'], ['work', 'Work']].map(([k, l]) => (
+        {[['foryou', 'For you'], ['friends', 'Friends'], ...(hasWork ? [['work', 'Work']] : [])].map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
-      {tab === 'work' ? <WorkTab initialView={workView} /> : <>
+      {tab === 'work' ? (hasWork ? <WorkTab initialView={workView} /> : <Spinner />) : <>
       <StoryBar groups={stories} onOpen={(i) => setViewer(i)} onCreate={() => setCreating(true)} />
       <MoodCheckin />
       {posts === null ? <Spinner /> : posts.length === 0 ? (

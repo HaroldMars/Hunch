@@ -576,6 +576,16 @@ if (getSetting('teams_migrated') !== '1') {
     setSetting('teams_migrated', '1');
   });
 }
+// Department hierarchy: a manager supervises many teams (Social Media → Team Trustpilot, Team Expedia, …).
+addColumn('teams', 'manager_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+addColumn('teams', 'department', "TEXT NOT NULL DEFAULT 'Social Media'");
+addColumn('users', 'department', "TEXT NOT NULL DEFAULT ''");
+// Once: with a single manager, that manager supervises every existing team.
+if (getSetting('team_managers_migrated') !== '1') {
+  const managers = all("SELECT id FROM users WHERE role = 'manager' AND status = 'active'");
+  if (managers.length === 1) run('UPDATE teams SET manager_id = ? WHERE manager_id IS NULL', managers[0].id);
+  setSetting('team_managers_migrated', '1');
+}
 
 // Railway: without a volume the database is wiped on every update (all accounts, posts and passwords reset).
 if (process.env.NODE_ENV === 'production' && process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {

@@ -66,6 +66,7 @@ function teamOut(team, { detail = false, period = range({}) } = {}) {
     ...team,
     tl,
     sme: person(team.sme_id),
+    manager: person(team.manager_id),
     counts: { smes: smes.length, agents: agents.length, total: ids.length },
     mood: moodMix(ids, period),
   };
@@ -104,6 +105,8 @@ r.get('/', h((req, res) => {
 r.get('/options', h((req, res) => {
   mustOversee(req);
   res.json({
+    managers: all("SELECT id, full_name, user_code, avatar FROM users WHERE role = 'manager' AND status = 'active' ORDER BY full_name COLLATE NOCASE"),
+    departments: all("SELECT DISTINCT department FROM teams WHERE department != '' ORDER BY department COLLATE NOCASE").map((d) => d.department),
     teamLeaders: all(`SELECT u.id, u.full_name, u.user_code, u.avatar, t.id team_id, t.name team_name
       FROM users u LEFT JOIN teams t ON t.tl_id = u.id WHERE u.role = 'tl' AND u.status = 'active' ORDER BY u.full_name COLLATE NOCASE`),
     smes: all(`SELECT u.id, u.full_name, u.user_code, u.avatar, u.team_leader_id, t.id team_id, t.name team_name
@@ -129,7 +132,8 @@ r.get('/member/:uid', h((req, res) => {
   const u = get(`SELECT ${MEMBER_COLS}, created_at, last_login_at FROM users WHERE id = ?`, Number(req.params.uid)) || fail(404, 'User not found.');
   const tlId = u.role === 'tl' ? u.id : u.team_leader_id;
   const scope = teamScope(req.user);
-  if (scope !== null && scope !== tlId) fail(403, 'You can only view members of your own team.');
+  const ownManager = u.role === 'manager' && scope !== null && get('SELECT 1 x FROM teams WHERE tl_id = ? AND manager_id = ?', scope, u.id);
+  if (scope !== null && scope !== tlId && !ownManager) fail(403, 'You can only view members of your own team.');
   const period = range(req.query);
   const team = tlId ? get('SELECT id, name, color FROM teams WHERE tl_id = ?', tlId) : null;
   const today = localDay();
@@ -162,6 +166,12 @@ function readTeam(body, current = {}) {
     v.name = String(body.name ?? '').trim().slice(0, 60);
     if (!v.name) fail(400, 'Team name is required.');
     if (get("SELECT id FROM teams WHERE name = ? COLLATE NOCASE AND id != ? AND status = 'active'", v.name, current.id || 0)) fail(409, 'Another team already uses that name.');
+  }
+  if (body.department !== undefined || !current.id) v.department = String(body.department ?? '').trim().slice(0, 60) || 'Social Media';
+  if (body.manager_id !== undefined) {
+    const m = Number(body.manager_id) || null;
+    if (m && !get("SELECT id FROM users WHERE id = ? AND role = 'manager' AND status = 'active'", m)) fail(400, 'Choose an active manager.');
+    v.manager_id = m;
   }
   if (body.description !== undefined) v.description = String(body.description || '').trim().slice(0, 300);
   if (body.color !== undefined) { if (!COLOR.test(body.color)) fail(400, 'Pick a team colour.'); v.color = body.color; }
@@ -199,8 +209,10 @@ r.post('/', h((req, res) => {
   mustOversee(req);
   const v = readTeam(req.body || {});
   const id = tx(() => {
-    const id = Number(run('INSERT INTO teams (name, tl_id, sme_id, description, color, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      v.name, v.tl_id, v.sme_id ?? null, v.description ?? '', v.color ?? '#5B8DEF', v.status ?? 'active', req.user.id).lastInsertRowid);
+    // A manager who creates a team supervises it unless someone else is chosen.
+    const manager = v.manager_id !== undefined ? v.manager_id : (req.user.role === 'manager' ? req.user.id : null);
+    const id = Number(run('INSERT INTO teams (name, tl_id, sme_id, manager_id, department, description, color, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      v.name, v.tl_id, v.sme_id ?? null, manager, v.department, v.description ?? '', v.color ?? '#5B8DEF', v.status ?? 'active', req.user.id).lastInsertRowid);
     if (v.sme_id) run('UPDATE users SET team_leader_id = ? WHERE id = ?', v.tl_id, v.sme_id);
     return id;
   });
@@ -229,6 +241,7 @@ r.patch('/:id', h((req, res) => {
     notifyLeader(team.tl_id, req.user.id, 'Team leader changed', `You are no longer the team leader of ${name}.`);
   }
   if (v.sme_id && v.sme_id !== team.sme_id) notifyMember(v.sme_id, req.user.id, 'Team assignment', `You are now the SME of ${name}.`);
+  if (v.manager_id && v.manager_id !== team.manager_id) notifyMember(v.manager_id, req.user.id, 'Team assignment', `You now supervise ${name}.`);
   res.json({ team: teamOut(teamById(team.id), { detail: true }) });
 }));
 
