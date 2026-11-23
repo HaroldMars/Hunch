@@ -9,7 +9,24 @@ import {
 } from '../util.js';
 import { notify, notifyStaff } from '../notify.js';
 import { sessionPayload } from './auth.js';
-import { teamName } from '../teams.js';
+import { teamName, teamRow, teamOf } from '../teams.js';
+
+/** Workplace identity shown on a profile: team, department and (for managers) the teams they supervise. */
+function workInfo(u) {
+  const tlId = teamOf(get('SELECT id, role, team_leader_id FROM users WHERE id = ?', u.id));
+  const row = tlId ? teamRow(tlId) : null;
+  const managed = u.role === 'manager'
+    ? all("SELECT id, name, color, department FROM teams WHERE manager_id = ? AND status = 'active' ORDER BY name COLLATE NOCASE", u.id)
+    : [];
+  return {
+    team_leader: tlId && tlId !== u.id ? publicUser(tlId) : null,
+    team_name: tlId ? teamName(tlId) : null,
+    team_color: row?.color || null,
+    team_department: row?.department || managed[0]?.department || null,
+    managed_teams: managed,
+  };
+}
+const USERNAME = /^[a-z0-9._]{3,30}$/i;
 import { hydratePosts } from './posts.js';
 
 const r = Router();
@@ -56,11 +73,11 @@ r.get('/users/:id', h((req, res) => {
     friends: friendIds(u.id).length,
   };
   const mutuals = me === u.id ? 0 : friendIds(u.id).filter((id) => friendIds(me).includes(id)).length;
-  const tl = get('SELECT team_leader_id FROM users WHERE id = ?', u.id)?.team_leader_id;
+  const work = canView ? workInfo(u) : {};
   res.json({
     ...u,
-    team_leader: canView && tl ? publicUser(tl) : null,
-    team_name: canView && tl ? teamName(tl) : null,
+    ...work,
+    department: u.department || work.team_department || '',
     relation: relation(me, u.id),
     canView,
     counts,
@@ -70,8 +87,17 @@ r.get('/users/:id', h((req, res) => {
 }));
 
 r.patch('/users/me', h((req, res) => {
-  const allowed = ['full_name', 'bio', 'job_title', 'location', 'privacy'];
+  const allowed = ['full_name', 'bio', 'job_title', 'department', 'location', 'privacy'];
   const b = req.body || {};
+  if (b.username !== undefined) {
+    const name = String(b.username || '').trim().replace(/^@/, '');
+    if (!name) run('UPDATE users SET username = NULL WHERE id = ?', req.user.id);
+    else {
+      if (!USERNAME.test(name)) fail(400, 'Usernames are 3–30 letters, numbers, dots or underscores.');
+      if (get('SELECT id FROM users WHERE username = ? AND id != ?', name, req.user.id)) fail(409, 'That username is taken.');
+      run('UPDATE users SET username = ? WHERE id = ?', name, req.user.id);
+    }
+  }
   for (const k of allowed) {
     if (b[k] === undefined) continue;
     let v = String(b[k]).trim();
@@ -87,6 +113,19 @@ r.post('/users/me/avatar', imageUpload.single('avatar'), h((req, res) => {
   if (!req.file) fail(400, 'Choose an image.');
   run('UPDATE users SET avatar = ? WHERE id = ?', fileUrl(req.file), req.user.id);
   deleteStoredFiles(req.user.avatar); // the previous photo is deleted permanently
+  res.json(selfUser(get('SELECT * FROM users WHERE id = ?', req.user.id)));
+}));
+
+r.post('/users/me/cover', imageUpload.single('cover'), h((req, res) => {
+  if (!req.file) fail(400, 'Choose an image.');
+  run('UPDATE users SET cover = ? WHERE id = ?', fileUrl(req.file), req.user.id);
+  deleteStoredFiles(req.user.cover);
+  res.json(selfUser(get('SELECT * FROM users WHERE id = ?', req.user.id)));
+}));
+
+r.delete('/users/me/cover', h((req, res) => {
+  run('UPDATE users SET cover = NULL WHERE id = ?', req.user.id);
+  deleteStoredFiles(req.user.cover);
   res.json(selfUser(get('SELECT * FROM users WHERE id = ?', req.user.id)));
 }));
 

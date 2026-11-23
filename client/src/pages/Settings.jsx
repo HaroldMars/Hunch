@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
 import Logo from '@shared/Logo.jsx';
 import { ROLE_LABELS } from '@shared/constants.js';
-import { api, ADMIN_URL } from '../api.js';
+import { api } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, TopBar, Sheet, Confirm, Spinner, Empty, useLoad } from '../components/ui.jsx';
 
@@ -14,7 +14,7 @@ const SECTIONS = [
   { key: 'appearance', icon: 'moon', label: 'Appearance', sub: 'Light, dark or system default' },
   { key: 'data', icon: 'download', label: 'Data & Storage', sub: 'Media downloads, cache, storage usage' },
   { key: 'help', icon: 'comment', label: 'Help & Support', sub: 'FAQ, contact support, terms, privacy policy' },
-  { key: 'about', icon: 'sparkle', label: 'About Hunch', sub: 'Version information' },
+  { key: 'about', icon: 'sparkle', label: 'About Hunch', sub: 'Our story, mission and version' },
 ];
 
 function Row({ icon, label, sub, onClick, right, danger }) {
@@ -83,14 +83,6 @@ function Home() {
       <Group>
         {SECTIONS.map((s) => <Row key={s.key} icon={s.icon} label={s.label} sub={s.sub} onClick={() => nav(`/settings/${s.key}`)} />)}
       </Group>
-      {user.role !== 'agent' && (
-        <Group>
-          <Row icon="chart" label="Open admin dashboard" sub="Statistics, reports and team tools" onClick={async () => {
-            const r = await api('/auth/handoff', { method: 'POST', body: { app: 'admin' } });
-            window.open(`${ADMIN_URL}#handoff=${encodeURIComponent(r.token)}&r=0`, '_blank', 'noopener');
-          }} />
-        </Group>
-      )}
       <Group><Row icon="logout" label="Sign out" danger right={<span />} onClick={() => setConfirm(true)} /></Group>
       {confirm && <Confirm title="Sign out of Hunch?" confirmLabel="Sign out" onClose={() => setConfirm(false)} onConfirm={logout} message="You can sign back in any time with your email and password." />}
     </>
@@ -334,21 +326,53 @@ function Help() {
   );
 }
 
+const HELPS = [
+  ['sparkle', 'Share your day', 'Post moments and Mood Stories from your day.'],
+  ['smile', 'Express how you feel', 'Check in with a mood and see how your circle is doing.'],
+  ['users', 'Stay close to friends', 'Connect with friends and discover mutual connections.'],
+  ['map', 'Discover nearby moments', 'Find stories and activity happening around you on the map.'],
+  ['briefcase', 'Work with your team', 'A private Work feed for your team’s posts and updates.'],
+  ['calendar', 'Stay on schedule', 'Shifts, meetings, updates and announcements in one place.'],
+  ['comment', 'Talk it through', 'Private and group messages with the people who matter.'],
+  ['heart', 'Build real relationships', 'Grow both personal and professional connections.'],
+];
+
 function About() {
   const { settings } = useApp();
   return (
-    <>
-      <div style={{ textAlign: 'center', padding: '24px 0 8px' }}>
-        <Logo size={56} />
-        <h2 style={{ margin: '14px 0 2px' }}>Hunch</h2>
-        <div className="muted small">Social Mood & Team Engagement</div>
-      </div>
+    <div className="about-hunch">
+      <section className="ah-hero">
+        <Logo size={64} />
+        <h2>Hunch</h2>
+        <p className="ah-tag">Connect. Express. Discover. Grow.</p>
+      </section>
+
+      <section className="ah-story">
+        <h3>More than a social app</h3>
+        <p>Hunch is a place to express yourself, connect with others, share your day and build meaningful relationships through moods, stories, conversations and communities.</p>
+        <p>It was made to keep you close to your friends, show you the moments happening around you, help you work with your teammates, and let you share real life in a more personal, interactive way.</p>
+        <p>Most platforms do one of these things. Hunch brings social networking, mood sharing, location-based discovery, team collaboration, workspaces, messaging and community into one seamless experience.</p>
+      </section>
+
+      <Group title="How Hunch helps you">
+        <div className="ah-grid">
+          {HELPS.map(([i, t, d]) => (
+            <div key={t} className="ah-card"><span className="ah-ic"><Icon name={i} size={19} /></span><b>{t}</b><small>{d}</small></div>
+          ))}
+        </div>
+      </Group>
+
+      <blockquote className="ah-mission">
+        <span>Our mission</span>
+        “To create a platform where people can connect, express, discover, and grow together through shared experiences, meaningful conversations, and real-world connections.”
+      </blockquote>
+
       <Group title="Version information">
         <div className="about-row"><Icon name="sparkle" size={18} /><span>Version</span><b>{settings.app_version || '-'}</b></div>
         <div className="about-row"><Icon name="globe" size={18} /><span>Platform</span><b>Web</b></div>
         <div className="about-row"><Icon name="settings" size={18} /><span>Build</span><b>{import.meta.env.MODE}</b></div>
       </Group>
-      <p className="small muted" style={{ textAlign: 'center' }}>Connect. Share. Express.</p>
-    </>
+      <p className="small muted" style={{ textAlign: 'center', margin: '18px 0 8px' }}>Made for people who share real moments.</p>
+    </div>
   );
 }

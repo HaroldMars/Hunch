@@ -31,7 +31,8 @@ export default function WorkTab({ initialView }) {
         <Avatar user={ctx.team.leader} size={44} />
         <div className="meta">
           <div className="title">{ctx.team.name} <span className="wk-private"><Icon name="lock" size={11} /> Team only</span></div>
-          <div className="sub">{ctx.team.members} members · led by {ctx.team.leader.id === user.id ? 'you' : ctx.team.leader.full_name}</div>
+          <div className="sub">{ctx.team.members} members · led by {ctx.team.leader.id === user.id ? 'you' : ctx.team.leader.full_name}{ctx.team.sme ? ` · SME ${ctx.team.sme.id === user.id ? 'you' : ctx.team.sme.full_name}` : ''}</div>
+          {(ctx.team.department || ctx.team.manager) && <div className="sub">{ctx.team.department ? `${ctx.team.department.replace(/\s*department$/i, '')} Department` : ''}{ctx.team.department && ctx.team.manager ? ' · ' : ''}{ctx.team.manager ? `Manager ${ctx.team.manager.id === user.id ? '(you)' : ctx.team.manager.full_name}` : ''}</div>}
         </div>
       </div>
       <div className="work-views" role="tablist">

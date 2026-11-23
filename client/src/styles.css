@@ -1297,3 +1297,37 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 @media (hover: none) and (pointer: coarse) {
   .nb-lg textarea { font-size: 18px !important; } /* the large note bubble keeps its bigger text */
 }
+
+/* ---------- About Hunch ---------- */
+.about-hunch { padding-bottom: 12px; }
+.ah-hero { text-align: center; padding: 28px 16px 22px; margin-top: 6px; border-radius: 22px;
+  background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--primary) 26%, transparent), transparent 70%), var(--surface-2); }
+.ah-hero h2 { margin: 12px 0 4px; font-size: 26px; letter-spacing: -0.02em; }
+.ah-tag { margin: 0; color: var(--text-2); font-weight: 600; font-size: 14px; }
+.ah-story { padding: 18px 4px 4px; }
+.ah-story h3 { margin: 0 0 8px; font-size: 18px; }
+.ah-story p { margin: 0 0 10px; color: var(--text-2); line-height: 1.6; font-size: 14.5px; }
+.ah-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 2px 0 12px; }
+.ah-card { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); min-width: 0; }
+.ah-card b { font-size: 13.5px; }
+.ah-card small { color: var(--text-3); font-size: 12px; line-height: 1.45; }
+.ah-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; margin-bottom: 4px;
+  color: var(--primary); background: color-mix(in srgb, var(--primary) 16%, transparent); }
+.ah-mission { margin: 16px 0 0; padding: 18px 18px 18px 20px; border-radius: 16px; border-left: 4px solid var(--primary);
+  background: var(--surface-2); font-size: 15px; line-height: 1.6; font-style: italic; color: var(--text); }
+.ah-mission span { display: block; font-style: normal; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; }
+@media (max-width: 360px) { .ah-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Profile: cover photo & work identity ---------- */
+.profile-cover { height: 150px; margin: 0 0 -48px; background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 45%, var(--surface-2)), var(--surface-2)); background-size: cover; background-position: center; }
+.profile-cover + .profile-head { position: relative; }
+.profile-cover + .profile-head > .avatar { box-shadow: 0 0 0 4px var(--bg); }
+.work-id { margin-top: 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 13.5px; }
+.work-id .jt { font-weight: 700; color: var(--text); }
+.work-id .tm { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 600; }
+.work-id .tm i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.work-id .dp { color: var(--text-3); font-size: 12.5px; }
+.ep-cover { position: relative; height: 120px; border-radius: 16px; overflow: hidden; margin-top: 6px; background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 45%, var(--surface-2)), var(--surface-2)); background-size: cover; background-position: center; }
+.ep-cover .ep-cover-actions { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
+.ep-section { margin: 22px 0 4px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.input.readonly { background: var(--surface-2); color: var(--text-2); display: flex; align-items: center; gap: 8px; }
