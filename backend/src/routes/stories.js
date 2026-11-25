@@ -5,7 +5,7 @@ import { auth } from '../auth.js';
 import { h, fail, imageUpload, fileUrl, deleteStoredFiles, publicUser, friendIds, areFriends, nowIso, hoursFromNow, localDay, blockedIds, canViewProfile, isBlocked } from '../util.js';
 import { postMessage } from './chats.js';
 import { notify } from '../notify.js';
-import { teamOf, teamMemberIds, teamName } from '../teams.js';
+import { teamOf, teamMemberIds, teamName, canAccessTeam } from '../teams.js';
 
 const r = Router();
 r.use(auth());
@@ -15,16 +15,20 @@ export const logMood = (userId, mood, source) => run('INSERT INTO mood_logs (use
 
 // ---------- Mood Story (24h) ----------
 // ---------- story audiences ----------
-export const AUDIENCES = ['public', 'friends', 'close_friends', 'team', 'private'];
+// Public = anyone, Friends = accepted friends, Team = your work team, Private = only you. (Close Friends was retired.)
+export const AUDIENCES = ['public', 'friends', 'team', 'private'];
+export const EFFECTS = ['warm', 'cool', 'mono', 'vivid', 'fade', 'dream'];
+export const NOTE_CATEGORIES = ['thought', 'mood', 'question', 'quote', 'update', 'achievement'];
 const viewerTeam = (uid) => teamOf(get('SELECT id, role, team_leader_id FROM users WHERE id = ?', uid));
 export function canSeeStory(s, me) {
   if (s.user_id === me) return true;
   if (isBlocked(me, s.user_id)) return false;
   switch (s.audience) {
     case 'private': return false;
-    case 'close_friends': return areFriends(me, s.user_id) && !!get('SELECT 1 x FROM close_friends WHERE user_id = ? AND friend_id = ?', s.user_id, me);
-    case 'team': return !!s.team_id && viewerTeam(me) === s.team_id;
-    default: return areFriends(me, s.user_id); // public + friends: shown to friends (public ones can also be discovered on the map)
+    // Team members, plus the team's supervising manager (who sees team stories in the Work feed).
+    case 'team': return !!s.team_id && (viewerTeam(me) === s.team_id || canAccessTeam(get('SELECT id, role, team_leader_id FROM users WHERE id = ?', me), s.team_id));
+    case 'public': return true;
+    default: return areFriends(me, s.user_id);
   }
 }
 const parse = (v, fb) => { try { return JSON.parse(v); } catch { return fb; } };
@@ -33,13 +37,14 @@ const parse = (v, fb) => { try { return JSON.parse(v); } catch { return fb; } };
 export const sharesLocation = (uid) => userSettings(uid).location_sharing === 'friends';
 export const storyOut = (s, viewerId) => ({
   ...s,
-  ...(s.user_id !== viewerId && !sharesLocation(s.user_id) ? { place_name: null, lat: null, lng: null } : {}),
+  // A place is shown when the owner shares location, or put this story on Map Discovery themselves.
+  ...(s.user_id !== viewerId && !sharesLocation(s.user_id) && !s.show_on_map ? { place_name: null, lat: null, lng: null } : {}),
   seen: !!get('SELECT 1 x FROM story_views WHERE story_id = ? AND user_id = ?', s.id, viewerId),
   my_reaction: get('SELECT reaction FROM story_views WHERE story_id = ? AND user_id = ?', s.id, viewerId)?.reaction || null,
   view_count: s.user_id === viewerId ? get('SELECT COUNT(*) c FROM story_views WHERE story_id = ?', s.id).c : undefined,
   like_count: s.user_id === viewerId ? get("SELECT COUNT(*) c FROM story_views WHERE story_id = ? AND reaction IS NOT NULL", s.id).c : undefined,
   comment_count: s.allow_comments ? get('SELECT COUNT(*) c FROM story_comments WHERE story_id = ?', s.id).c : 0,
-  music: null, // music was removed; older stories keep the column but it is never shown
+  music: parse(s.music, null),
   stickers: parse(s.stickers, []).map((st) => (st.type === 'poll' ? {
     ...st,
     counts: st.options.map((_, i) => get('SELECT COUNT(*) c FROM story_poll_votes WHERE story_id = ? AND option = ?', s.id, i).c),
@@ -111,17 +116,20 @@ r.post('/stories', imageUpload.single('image'), h((req, res) => {
   if (audience === 'team' && !teamId) fail(400, 'You are not on a team yet, so you can’t post a Team-only story.');
   const stickers = readStickers(b.stickers, audience, req.user.id);
   if (!text && !req.file && !mood && !stickers.length) fail(400, 'Add a photo, text or a mood.');
+  if (audience === 'private') b.show_on_map = '0'; // private stories never reach the Map
   // Optional location tag (📍 Cebu City). Coordinates are validated; the name is free text from the place search.
   const lat = Number(b.lat), lng = Number(b.lng);
   const hasLoc = b.lat !== undefined && b.lat !== '' && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
   const place = hasLoc ? String(b.place_name || '').trim().slice(0, 120) || 'Pinned location' : null;
   const hours = [6, 12, 24].includes(Number(b.duration_hours)) ? Number(b.duration_hours) : Number(getSetting('story_hours')) || 24;
+  const effect = EFFECTS.includes(b.effect) ? b.effect : null;
+  const music = readMusic(b.music);
   const id = Number(run(`INSERT INTO stories (user_id, text, image, mood, theme, allow_comments, place_name, lat, lng, expires_at,
-      audience, team_id, allow_replies, allow_reactions, allow_sharing, show_on_map, archive, stickers)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      audience, team_id, allow_replies, allow_reactions, allow_sharing, show_on_map, archive, stickers, effect, music)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   req.user.id, text, fileUrl(req.file), mood, theme, flag(b.allow_comments, 0), place, hasLoc ? lat : null, hasLoc ? lng : null, hoursFromNow(hours),
   audience, teamId, flag(b.allow_replies, 1), flag(b.allow_reactions, 1), flag(b.allow_sharing, 1), hasLoc ? flag(b.show_on_map, 1) : 0, flag(b.archive, 1),
-  JSON.stringify(stickers)).lastInsertRowid);
+  JSON.stringify(stickers), effect, music && JSON.stringify(music)).lastInsertRowid);
   if (mood) logMood(req.user.id, mood, 'story');
   const created = get('SELECT * FROM stories WHERE id = ?', id);
   stickers.filter((st) => st.type === 'mention').forEach((st) => canSeeStory(created, st.user_id) && notify({ userId: st.user_id, type: 'story_reaction', actorId: req.user.id, entityType: 'story', entityId: id, title: 'Mentioned in a story', body: `${req.user.full_name} mentioned you in their Mood Story.` }));
@@ -258,15 +266,36 @@ r.post('/stories/:id/share', h((req, res) => {
   res.json({ ok: true, sent: ids.length });
 }));
 
-// ---------- close friends ----------
-r.get('/close-friends', h((req, res) => res.json(all('SELECT friend_id FROM close_friends WHERE user_id = ?', req.user.id).map((x) => x.friend_id))));
-r.put('/close-friends', h((req, res) => {
-  const ids = [...new Set((req.body?.ids || []).map(Number))].filter((id) => areFriends(req.user.id, id) && id !== req.user.id);
-  tx(() => {
-    run('DELETE FROM close_friends WHERE user_id = ?', req.user.id);
-    ids.forEach((id) => run('INSERT INTO close_friends (user_id, friend_id) VALUES (?, ?)', req.user.id, id));
+// ---------- story music (Freesound) ----------
+// Search runs through the API so the Freesound key stays on the server. Without FREESOUND_API_KEY the Music tool is hidden.
+// (Pixabay's public API covers photos and videos only; it has no music endpoint.)
+const MUSIC_HOST = /^https:\/\/cdn\.freesound\.org\//;
+function readMusic(raw) {
+  if (!raw) return null;
+  let m; try { m = JSON.parse(raw); } catch { return null; }
+  if (!m || !MUSIC_HOST.test(String(m.url || ''))) return null;
+  const duration = Math.min(60, Math.max(1, Math.round(Number(m.duration) || 30)));
+  return { id: String(m.id || '').slice(0, 20), title: String(m.title || 'Untitled').slice(0, 80), artist: String(m.artist || '').slice(0, 60), url: String(m.url).slice(0, 300), duration, source: 'freesound' };
+}
+r.get('/music/status', h((req, res) => res.json({ enabled: !!process.env.FREESOUND_API_KEY })));
+r.get('/music/search', h(async (req, res) => {
+  const key = process.env.FREESOUND_API_KEY;
+  if (!key) return res.json({ enabled: false, tracks: [] });
+  const q = String(req.query.q || '').trim().slice(0, 60) || 'chill music';
+  const url = `https://freesound.org/apiv2/search/text/?query=${encodeURIComponent(q)}&filter=${encodeURIComponent('duration:[8 TO 120] tag:music')}&fields=id,name,username,duration,previews&page_size=20&token=${encodeURIComponent(key)}`;
+  let data;
+  try {
+    const r2 = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r2.ok) fail(502, 'Music search is unavailable right now.');
+    data = await r2.json();
+  } catch (e) { if (e.status) throw e; fail(502, 'Music search is unavailable right now.'); }
+  res.json({
+    enabled: true,
+    tracks: (data.results || []).map((t) => ({
+      id: String(t.id), title: String(t.name || '').replace(/\.(mp3|wav|ogg|flac|aiff?)$/i, '').slice(0, 80), artist: t.username || '',
+      duration: Math.min(30, Math.round(t.duration || 30)), url: t.previews?.['preview-hq-mp3'] || t.previews?.['preview-lq-mp3'],
+    })).filter((t) => MUSIC_HOST.test(t.url || '')),
   });
-  res.json(ids);
 }));
 
 // ---------- Highlights ----------
@@ -466,6 +495,7 @@ r.post('/notes', h((req, res) => {
   const text = String(req.body?.text || '').trim();
   const { mood = null } = req.body || {};
   const emoji = String(req.body?.emoji || '').slice(0, 16) || null;
+  const category = NOTE_CATEGORIES.includes(req.body?.category) ? req.body.category : 'thought';
   const color = HEX.test(req.body?.color || '') ? req.body.color : null;
   const max = Number(getSetting('note_max_words')) || 35;
   if (mood && !MOOD_KEYS.includes(mood)) fail(400, 'Unknown mood.');
@@ -474,8 +504,8 @@ r.post('/notes', h((req, res) => {
   if (text.length > 400) fail(400, 'Note is too long.');
   tx(() => {
     run('DELETE FROM notes WHERE user_id = ?', req.user.id); // one active note per user
-    run('INSERT INTO notes (user_id, text, mood, theme, emoji, color, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      req.user.id, text, mood || '', 'midnight', emoji, color, hoursFromNow(Number(getSetting('note_hours')) || 24));
+    run('INSERT INTO notes (user_id, text, mood, theme, emoji, color, category, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      req.user.id, text, mood || '', 'midnight', emoji, color, category, hoursFromNow(Number(getSetting('note_hours')) || 24));
   });
   if (mood) logMood(req.user.id, mood, 'note');
   res.status(201).json(noteOut(get('SELECT * FROM notes WHERE user_id = ?', req.user.id), req.user.id));

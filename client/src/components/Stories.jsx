@@ -6,20 +6,24 @@ import { useApp } from '../store.jsx';
 import { Avatar, Sheet, FilePreviews, MoodPicker, ThemePicker, timeAgo, Spinner, Confirm } from './ui.jsx';
 import { LocationTagSheet } from './Places.jsx';
 import { ShareSheet } from './Post.jsx';
-import { StoryOverlays } from './StoryOverlays.jsx';
+import { StoryOverlays, effectCss } from './StoryOverlays.jsx';
 import { useNavigate } from 'react-router-dom';
 
-export function StoryBar({ groups, onOpen, onCreate }) {
+export function StoryBar({ groups, onOpen, onCreate, hideAdd }) {
   const { user } = useApp();
   const mine = groups.find((g) => g.user.id === user.id);
   return (
     <div className="stories">
-      <button className="story-card add" onClick={mine ? () => onOpen(groups.indexOf(mine)) : onCreate} aria-label="Your Mood Story">
+      {hideAdd ? mine && (
+        <button className={`story-card ${mine.allSeen ? '' : 'unseen'}`} onClick={() => onOpen(groups.indexOf(mine))}>
+          <StoryThumb s={mine.stories.at(-1)} /><span className="shade" /><span className="name">You</span>
+        </button>
+      ) : <button className="story-card add" onClick={mine ? () => onOpen(groups.indexOf(mine)) : onCreate} aria-label="Your Mood Story">
         {mine ? <StoryThumb s={mine.stories.at(-1)} /> : <span className="plus"><Icon name="plus" size={20} /></span>}
         {mine && <span className="shade" />}
         <span className="name" style={mine ? { color: '#fff' } : undefined}>Your Mood Story</span>
         {mine && <span onClick={(e) => { e.stopPropagation(); onCreate(); }} style={{ position: 'absolute', right: 6, top: 6, width: 22, height: 22, borderRadius: 11, background: 'var(--primary)', display: 'grid', placeItems: 'center' }}><Icon name="plus" size={14} /></span>}
-      </button>
+      </button>}
       {groups.filter((g) => g.user.id !== user.id).map((g) => (
         <button key={g.user.id} className={`story-card ${g.allSeen ? '' : 'unseen'}`} onClick={() => onOpen(groups.indexOf(g))}>
           <StoryThumb s={g.stories.at(-1)} />
@@ -33,70 +37,8 @@ export function StoryBar({ groups, onOpen, onCreate }) {
 }
 
 function StoryThumb({ s }) {
-  if (s.image) return <img className="bg" src={s.image} alt="" />;
+  if (s.image) return <img className="bg" src={s.image} alt="" style={{ filter: effectCss(s.effect) }} />;
   return <span className="bgfill" style={{ background: themeCss(s.theme) }}>{moodByKey(s.mood)?.emoji || ''}</span>;
-}
-
-export function StoryCreator({ onClose, onCreated }) {
-  const { toast } = useApp();
-  const [file, setFile] = useState(null);
-  const [text, setText] = useState('');
-  const [mood, setMood] = useState(null);
-  const [theme, setTheme] = useState('ocean');
-  const [allowComments, setAllowComments] = useState(false);
-  const [place, setPlace] = useState(null);
-  const [tagging, setTagging] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const { prefs } = useApp();
-  const ref = useRef();
-  const submit = async () => {
-    setBusy(true);
-    try {
-      const s = await api('/stories', { method: 'POST', form: toForm({ image: file, text, mood, theme, allow_comments: allowComments ? '1' : '0', ...(place ? { place_name: place.name, lat: String(place.lat), lng: String(place.lng) } : {}) }) });
-      toast('Mood Story shared for 24 hours', 'success');
-      onCreated(s);
-      onClose();
-    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
-  };
-  const m = moodByKey(mood);
-  return (
-    <Sheet title="New Mood Story" onClose={onClose}
-      footer={<button className="btn block" disabled={busy || (!file && !text.trim() && !mood)} onClick={submit}>{busy ? 'Sharing…' : 'Share to Mood Story'}</button>}>
-      <div style={{ position: 'relative', height: 220, borderRadius: 18, overflow: 'hidden', background: themeCss(theme), color: '#fff', display: 'grid', placeItems: 'center', textAlign: 'center' }}>
-        {file ? <FileBg file={file} /> : null}
-        <div style={{ position: 'relative', padding: 16 }}>
-          {!file && m && <div style={{ fontSize: 48 }}>{m.emoji}</div>}
-          <div style={{ fontWeight: 800, fontSize: 19, textShadow: '0 1px 6px rgba(0,0,0,.5)' }}>{text || (!file && !m ? 'Your story preview' : '')}</div>
-          {m && <div className="story-mood">{m.emoji} Feeling {m.label.toLowerCase()}</div>}
-        </div>
-        {place && <div className="story-place">📍 {place.name}</div>}
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-        <button className="btn ghost sm" onClick={() => ref.current.click()}><Icon name="camera" size={18} /> {file ? 'Change photo' : 'Add photo'}</button>
-        {file && <button className="btn ghost sm" onClick={() => setFile(null)}>Remove photo</button>}
-        {place ? <button className="btn ghost sm" onClick={() => setPlace(null)} title="Remove location"><Icon name="location" size={17} /> {place.name.length > 18 ? place.name.slice(0, 17) + '…' : place.name} <Icon name="close" size={14} /></button>
-          : <button className="btn ghost sm" onClick={() => setTagging(true)}><Icon name="location" size={17} /> Location</button>}
-      </div>
-      <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => { setFile(e.target.files[0] || null); e.target.value = ''; }} />
-      <label className="label">Text</label>
-      <input className="input" maxLength={200} placeholder="Say something…" value={text} onChange={(e) => setText(e.target.value)} />
-      <label className="label">Mood</label>
-      <MoodPicker value={mood} onChange={setMood} />
-      {!file && <><label className="label">Background theme</label><ThemePicker value={theme} onChange={setTheme} /></>}
-      <label className="toggle-row"><span><b>Allow comments</b><small>Friends who see this story can leave public comments.</small></span><input type="checkbox" className="switch" checked={allowComments} onChange={(e) => setAllowComments(e.target.checked)} /></label>
-      {tagging && <LocationTagSheet sharing={prefs?.location_sharing} onPick={setPlace} onClose={() => setTagging(false)} />}
-    </Sheet>
-  );
-}
-
-function FileBg({ file }) {
-  const [url, setUrl] = useState('');
-  useEffect(() => {
-    const u = URL.createObjectURL(file);
-    setUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [file]);
-  return <img src={url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />;
 }
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏'];
@@ -130,7 +72,19 @@ export function StoryViewer({ groups, startGroup = 0, onClose, onChanged, title,
     setProgress(0);
   }, [story?.id]);
   const dur = DURATION;
-  const stickerActions = preview || mine ? null : {
+  // Story music: plays while the story is on screen; tap the music card (or the speaker) to mute.
+  const audio = useRef(null);
+  const [muted, setMuted] = useState(false);
+  const playing = !!story?.music && !muted && !paused && !panel;
+  useEffect(() => { if (audio.current) audio.current.currentTime = 0; }, [story?.id]);
+  useEffect(() => { const a = audio.current; if (!a) return; if (playing) a.play().catch(() => setMuted(true)); else a.pause(); }, [playing, story?.id]);
+  const common = {
+    onPlace: preview ? undefined : (s) => { onClose(); navTo(`/map?story=${s.id}`); },
+    onMusic: () => setMuted((x) => !x),
+    playing,
+  };
+  const stickerActions = preview || mine ? common : {
+    ...common,
     onPoll: async (option) => { try { const p = await api(`/stories/${story.id}/poll`, { method: 'POST', body: { option } }); story.stickers = story.stickers.map((x) => (x.type === 'poll' ? p : x)); force((n) => n + 1); } catch (e) { toast(e.message, 'error'); } },
     onAnswer: async (text) => { try { await api(`/stories/${story.id}/answer`, { method: 'POST', body: { text } }); toast('Answer sent', 'success'); } catch (e) { toast(e.message, 'error'); } },
     onMention: (uid) => { onClose(); navTo(`/u/${uid}`); },
@@ -193,7 +147,8 @@ export function StoryViewer({ groups, startGroup = 0, onClose, onChanged, title,
     <div className="story-viewer">
       <div className="story-stage" onMouseDown={() => setPaused(true)} onMouseUp={() => setPaused(false)} onTouchStart={() => setPaused(true)} onTouchEnd={() => setPaused(false)}>
         <div className="story-content" style={{ background: story.image ? '#000' : themeCss(story.theme) }}>
-          {story.image ? <img src={story.image} alt="" /> : (
+          {story.music && <audio key={story.id} ref={audio} src={story.music.url} loop preload="auto" />}
+          {story.image ? <img src={story.image} alt="" style={{ filter: effectCss(story.effect) }} /> : (
             <div>
               {m && <div style={{ fontSize: 80 }}>{m.emoji}</div>}
               {story.text && <div className="story-text-only">{story.text}</div>}
@@ -211,10 +166,11 @@ export function StoryViewer({ groups, startGroup = 0, onClose, onChanged, title,
           <div style={{ flex: 1 }}>
             <div className="name">{title || group.user.full_name}</div>
             <div className="time">{preview ? 'Preview' : timeAgo(story.created_at)}{title ? ` · ${group.user.full_name}` : ''}
-              {story.audience === 'close_friends' && <span className="aud-badge close">★ Close Friends</span>}
+              {story.audience === 'public' && <span className="aud-badge">🌎 Public</span>}
               {story.audience === 'team' && <span className="aud-badge team">💼 {story.team_name || 'Team'}</span>}
               {story.audience === 'private' && <span className="aud-badge">🔒 Only you</span>}</div>
           </div>
+          {story.music && <button className="icon-btn" style={{ color: '#fff' }} onClick={(e) => { e.stopPropagation(); setMuted(!muted); }} aria-label={muted ? 'Play music' : 'Mute music'}><span style={{ fontSize: 18 }}>{muted ? '🔇' : '🔊'}</span></button>}
           {mine && !preview && <button className="icon-btn" style={{ color: '#fff' }} onClick={(e) => { e.stopPropagation(); setPanel('menu'); }} aria-label="Story options"><Icon name="more" /></button>}
           <button className="icon-btn" style={{ color: '#fff' }} onClick={onClose} aria-label="Close"><Icon name="close" /></button>
         </div>

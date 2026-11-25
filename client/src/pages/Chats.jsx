@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
-import { NotesRow, NoteView, NoteComposer } from '../components/Notes.jsx';
+import { MoodClouds, NoteView, NoteComposer } from '../components/Notes.jsx';
 import { useApp, useSocket } from '../store.jsx';
 import { Avatar, HeaderActions, Sheet, Spinner, Empty, listTime, timeAgo, useLoad, FilePreviews } from '../components/ui.jsx';
 
@@ -94,7 +94,7 @@ export default function Chats() {
       <div style={{ padding: '4px 16px 0' }}>
         <div className="search-bar"><Icon name="search" size={20} stroke={2.2} /><input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search chats" /></div>
       </div>
-      {!archived && <NotesRow notes={notes}
+      {!archived && !q && <MoodClouds notes={notes}
         onMine={() => setSheet(notes?.mine ? { type: 'view', note: notes.mine } : { type: 'edit' })}
         onOpen={(n) => setSheet({ type: 'view', note: n })} />}
       <div style={{ padding: '4px 16px' }}>

@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import Icon from '@shared/Icon.jsx';
 import { moodByKey } from '@shared/constants.js';
 
+/** Photo effects (applied as a CSS filter on the photo in the editor and the viewer). */
+export const STORY_EFFECTS = [
+  { key: null, label: 'Original', css: 'none' },
+  { key: 'warm', label: 'Warm', css: 'sepia(0.22) saturate(1.25) hue-rotate(-6deg)' },
+  { key: 'cool', label: 'Cool', css: 'saturate(1.1) hue-rotate(10deg) brightness(1.03)' },
+  { key: 'vivid', label: 'Vivid', css: 'saturate(1.55) contrast(1.08)' },
+  { key: 'mono', label: 'Mono', css: 'grayscale(1) contrast(1.12)' },
+  { key: 'fade', label: 'Fade', css: 'contrast(0.88) brightness(1.08) saturate(0.8)' },
+  { key: 'dream', label: 'Dream', css: 'brightness(1.08) saturate(1.2) contrast(0.95)' },
+];
+export const effectCss = (k) => STORY_EFFECTS.find((e) => e.key === k)?.css || 'none';
+export const mmss = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(Math.round(sec) % 60).padStart(2, '0')}`;
+
 /** Remaining time for countdown stickers, e.g. "2d 4h" / "3h 12m" / "Now". */
 export const untilText = (iso) => {
   const ms = new Date(iso) - Date.now();
@@ -75,17 +88,36 @@ function Sticker({ st, i, containerRef, editable, onMove, onRemove, actions }) {
 }
 
 /**
- * Everything drawn on top of a story: mood badge, caption, location card, stickers.
- * editable: the creator (drag stickers). actions: viewer interactions (poll, answer, mention).
+ * Everything drawn on top of a story. The content pieces (caption, mood, location, music) are a structured
+ * stack at the bottom, not floating stickers. Older stories may still carry stickers, which render as before.
+ * editable: the creator. actions: viewer interactions (poll, answer, mention, onPlace, onPiece).
  */
 export function StoryOverlays({ s, containerRef, editable = false, onMoveSticker, onRemoveSticker, actions, compact }) {
   const m = moodByKey(s.mood);
+  const caption = s.text && (s.image || s.drawn);
+  const hasStack = caption || m || s.place_name || s.music;
+  const piece = (k) => (e) => { e.stopPropagation(); actions?.onPiece?.(k); };
   return (
     <div className={`so-layer ${compact ? 'compact' : ''}`}>
-      {m && <div className="so-mood"><small>Mood today</small><span>{m.emoji} {m.label}</span></div>}
-      {s.text && (s.image || s.drawn) && <div className="so-caption">“{s.text}”</div>}
-      {s.place_name && (
-        <div className="so-place"><span className="pin"><Icon name="location" size={15} /></span><span><b>{s.place_name}</b>{s.show_on_map ? <small>Visible on Map</small> : null}</span></div>
+      {hasStack && (
+        <div className="so-stack">
+          {caption && <div className="so-caption" onClick={piece('caption')}>{s.text}</div>}
+          <div className="so-row">
+            {m && <button className="so-mood" onClick={piece('mood')}>{m.emoji} Feeling {m.label}</button>}
+            {s.place_name && (
+              <button className="so-place" onClick={(e) => { e.stopPropagation(); if (actions?.onPiece) actions.onPiece('location'); else if (s.show_on_map && actions?.onPlace) actions.onPlace(s); }}>
+                <span className="pin"><Icon name="location" size={14} /></span><b>{s.place_name}</b>{s.show_on_map ? <small>Map</small> : null}
+              </button>
+            )}
+          </div>
+          {s.music && (
+            <button className="so-music" onClick={(e) => { e.stopPropagation(); if (actions?.onPiece) actions.onPiece('music'); else actions?.onMusic?.(); }}>
+              <span className={`eq ${actions?.playing ? 'on' : ''}`}><i /><i /><i /></span>
+              <span className="t"><b>{s.music.title}</b>{s.music.artist && <small>{s.music.artist}</small>}</span>
+              <span className="d">{mmss(s.music.duration || 30)}</span>
+            </button>
+          )}
+        </div>
       )}
       {(s.stickers || []).map((st, i) => (
         <Sticker key={i} st={st} i={i} containerRef={containerRef} editable={editable} onMove={onMoveSticker} onRemove={onRemoveSticker} actions={actions} />

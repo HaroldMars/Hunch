@@ -19,6 +19,7 @@ import Notifications from './pages/Notifications.jsx';
 import Search from './pages/Search.jsx';
 import Settings from './pages/Settings.jsx';
 import TripTracker from './components/TripTracker.jsx';
+import PermissionsPrompt from './components/Permissions.jsx';
 const MapPage = lazy(() => import('./pages/Map.jsx'));
 import './styles.css';
 
@@ -73,6 +74,7 @@ function Shell() {
       </Routes>
       <NavGate />
       <TripTracker />
+      <PermissionsPrompt />
     </div>
   );
 }
