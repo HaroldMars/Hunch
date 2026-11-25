@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { MOOD_KEYS, ROLE_LABELS, STAFF_ROLES, isStaffRole } from '../../../shared/constants.js';
+import { MOOD_KEYS, ROLE_LABELS, STAFF_ROLES, isStaffRole, TEAM_ROLES, TEAM_ROLE_LABELS, moodByKey } from '../../../shared/constants.js';
+import { isOnline } from '../realtime.js';
 import { get, all, run, tx, getSetting, setSetting, DEFAULT_SETTINGS, codeFor } from '../db.js';
 import { auth, requireModule, creatableRoles, manageableRoles, assignableRoles, teamScope, modulesFor } from '../auth.js';
 import { sendWelcome, sendPasswordReset, mailEnabled } from '../mailer.js';
@@ -27,6 +28,84 @@ r.get('/stats', requireModule('stats'), h((req, res) => {
   const { from, to } = normalizeRange(req.query);
   const mood = MOOD_KEYS.includes(req.query.mood) ? req.query.mood : null;
   res.json({ ...statistics({ from, to, teamLeaderId: resolveTeam(req), mood }), scopedTeam: teamScope(req.user) });
+}));
+
+// ---------- Platform overview: users, Work Mode, content, teams and top activity ----------
+// Counts only; no post, message or team content is exposed.
+r.get('/platform', requireModule('stats'), h((req, res) => {
+  const c = (sql, ...args) => get(sql, ...args).c;
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startWeek = new Date(startToday); startWeek.setDate(startWeek.getDate() - ((startWeek.getDay() + 6) % 7));
+  const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const since = new Date(Date.now() - days * 864e5).toISOString();
+  const windowDays = Number(getSetting('active_window_days')) || 7;
+  const activeSince = new Date(Date.now() - windowDays * 864e5).toISOString();
+  const staff = STAFF_ROLES.map(() => '?').join(',');
+  const users = all(`SELECT id, status, last_active_at, work_mode, created_at FROM users WHERE role NOT IN (${staff})`, ...STAFF_ROLES);
+  const active = users.filter((u) => u.status === 'active');
+  const after = (d) => users.filter((u) => u.created_at >= d.toISOString()).length;
+  const teamRoles = all('SELECT m.role, COUNT(*) c FROM team_members m JOIN teams t ON t.id = m.team_id WHERE t.status = \'active\' GROUP BY m.role');
+  const topMood = get('SELECT mood, COUNT(*) c FROM mood_logs WHERE created_at >= ? GROUP BY mood ORDER BY c DESC LIMIT 1', since);
+  const mood = topMood && moodByKey(topMood.mood);
+  const teamOut = (t) => ({ id: t.id, name: t.name, logo: t.logo, members: c('SELECT COUNT(*) c FROM team_members WHERE team_id = ?', t.id) });
+  res.json({
+    days,
+    users: {
+      registered: users.length,
+      active: active.filter((u) => u.last_active_at && u.last_active_at >= activeSince).length,
+      inactive: users.length - active.filter((u) => u.last_active_at && u.last_active_at >= activeSince).length,
+      online: users.filter((u) => isOnline(u.id)).length,
+      newToday: after(startToday),
+      newWeek: after(startWeek),
+      newMonth: after(startMonth),
+      activeWindowDays: windowDays,
+      staff: c(`SELECT COUNT(*) c FROM users WHERE role IN (${staff})`, ...STAFF_ROLES),
+    },
+    work: {
+      enabled: active.filter((u) => u.work_mode).length,
+      disabled: active.filter((u) => !u.work_mode).length,
+      teams: c('SELECT COUNT(*) c FROM teams'),
+      activeTeams: c("SELECT COUNT(*) c FROM teams WHERE status = 'active'"),
+      newTeamsToday: c('SELECT COUNT(*) c FROM teams WHERE created_at >= ?', startToday.toISOString()),
+    },
+    content: {
+      posts: c('SELECT COUNT(*) c FROM posts WHERE team_id IS NULL'),
+      workPosts: c('SELECT COUNT(*) c FROM posts WHERE team_id IS NOT NULL'),
+      stories: c('SELECT COUNT(*) c FROM stories'),
+      notes: c('SELECT COUNT(*) c FROM notes'),
+      messages: c("SELECT COUNT(*) c FROM messages WHERE kind != 'system'"),
+      friendships: c("SELECT COUNT(*) c FROM friendships WHERE status = 'accepted'"),
+    },
+    teams: {
+      roles: TEAM_ROLES.map((role) => ({ role, label: TEAM_ROLE_LABELS[role], count: teamRoles.find((x) => x.role === role)?.c || 0 })),
+      members: c("SELECT COUNT(DISTINCT m.user_id) c FROM team_members m JOIN teams t ON t.id = m.team_id WHERE t.status = 'active'"),
+    },
+    top: {
+      users: all(`SELECT u.id, u.full_name, u.username, u.avatar,
+          (SELECT COUNT(*) FROM posts p WHERE p.user_id = u.id AND p.created_at >= ?) posts,
+          (SELECT COUNT(*) FROM comments x WHERE x.user_id = u.id AND x.created_at >= ?) comments,
+          (SELECT COUNT(*) FROM messages m WHERE m.sender_id = u.id AND m.kind != 'system' AND m.created_at >= ?) messages,
+          (SELECT COUNT(*) FROM stories s WHERE s.user_id = u.id AND s.created_at >= ?) stories
+        FROM users u WHERE u.status = 'active' AND u.role NOT IN (${staff})`, since, since, since, since, ...STAFF_ROLES)
+        .map((u) => ({ ...u, score: u.posts * 3 + u.stories * 2 + u.comments + u.messages })).filter((u) => u.score)
+        .sort((a, b) => b.score - a.score).slice(0, 5),
+      teams: all(`SELECT t.id, t.name, t.logo,
+          (SELECT COUNT(*) FROM posts p WHERE p.team_id = t.id AND p.created_at >= ?) posts,
+          (SELECT COUNT(*) FROM messages m JOIN conversations cv ON cv.id = m.conversation_id WHERE cv.team_id = t.id AND m.kind != 'system' AND m.created_at >= ?) messages,
+          (SELECT COUNT(*) FROM schedules s WHERE s.team_id = t.id AND s.created_at >= ?) schedules
+        FROM teams t WHERE t.status = 'active'`, since, since, since)
+        .map((t) => ({ ...teamOut(t), posts: t.posts, messages: t.messages, schedules: t.schedules, score: t.posts * 3 + t.messages + t.schedules }))
+        .filter((t) => t.score).sort((a, b) => b.score - a.score).slice(0, 5),
+      mood: mood ? { key: topMood.mood, label: mood.label, emoji: mood.emoji, count: topMood.c } : null,
+      locations: all(`SELECT place_name name, COUNT(*) count FROM stories WHERE place_name IS NOT NULL AND place_name != '' AND created_at >= ?
+        GROUP BY place_name COLLATE NOCASE ORDER BY count DESC LIMIT 5`, since),
+      teamChats: all(`SELECT cv.id, cv.name, t.name team, t.logo, COUNT(m.id) messages FROM conversations cv JOIN teams t ON t.id = cv.team_id
+          JOIN messages m ON m.conversation_id = cv.id AND m.kind != 'system' AND m.created_at >= ?
+        WHERE t.status = 'active' GROUP BY cv.id ORDER BY messages DESC LIMIT 5`, since),
+    },
+  });
 }));
 
 // ---------- Reports ----------

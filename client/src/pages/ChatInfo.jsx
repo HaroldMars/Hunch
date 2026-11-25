@@ -151,7 +151,7 @@ export default function ChatInfo() {
             {conv.members.map((m) => (
               <div key={m.id} className="row-item">
                 <Avatar user={m} size={40} online={m.online} onClick={() => nav(`/u/${m.id}`)} />
-                <div className="meta"><div className="title">{m.full_name}{m.id === user.id ? ' (you)' : ''}</div><div className="sub">{m.member_role === 'admin' ? (team ? 'Team admin' : 'Group admin') : 'Member'}</div></div>
+                <div className="meta"><div className="title">{m.full_name}{m.id === user.id ? ' (you)' : ''}</div><div className="sub">{m.member_role === 'admin' ? (team ? 'Channel admin' : 'Group admin') : 'Member'}</div></div>
                 {manageMembers && m.id !== user.id && (
                   <button className="icon-btn" aria-label={`Manage ${m.full_name}`} onClick={() => setSheet({ member: m })}><Icon name="more" size={18} /></button>
                 )}
