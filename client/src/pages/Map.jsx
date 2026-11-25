@@ -169,6 +169,14 @@ export default function MapPage() {
   useEffect(() => {
     if (!data || fitted.current || !map.current) return;
     fitted.current = true;
+    // From a story's location card: /map?story=<id> opens that place.
+    const storyFocus = Number(params.get('story'));
+    const place = storyFocus && places.find((p) => p.stories.some((s) => s.id === storyFocus));
+    if (storyFocus) {
+      setParams({}, { replace: true });
+      if (place) { map.current.setView([place.lat, place.lng], 15); open('place', { place }, true); return; }
+      toast('That story isn’t on the Map anymore.');
+    }
     const focus = Number(params.get('trip'));
     if (focus) setParams({}, { replace: true });
     const trip = data.trips.find((t) => t.id === focus) || data.trips.find((t) => t.mine);

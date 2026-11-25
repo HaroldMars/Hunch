@@ -5,16 +5,29 @@ import { api, toForm } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, Sheet, Spinner, useLoad } from './ui.jsx';
 import { PlaceSearch, currentPosition } from './Places.jsx';
-import { StoryOverlays } from './StoryOverlays.jsx';
+import { StoryOverlays, STORY_EFFECTS, effectCss, mmss } from './StoryOverlays.jsx';
 import { StoryViewer } from './Stories.jsx';
 
-const AUDIENCE = {
-  public: { icon: '🌎', label: 'Public', sub: 'All your friends. Location stories can be discovered on the Map.' },
-  friends: { icon: '👥', label: 'Friends', sub: 'Only your accepted friends.' },
-  close_friends: { icon: '⭐', label: 'Close Friends', sub: 'Only people on your Close Friends list.' },
-  team: { icon: '💼', label: 'Team Only', sub: 'Only your team.' },
-  private: { icon: '🔒', label: 'Private', sub: 'Only you. Saved to your archive.' },
+// Hunch story creation: Camera → Editor → Composer.
+// 1. Camera opens immediately (gallery bottom-left, capture, switch camera) with quick templates.
+// 2. Editor: the story preview with a short icon-only toolbar (Text, Mood, Location, Music, Effects, More).
+// 3. Composer: everything in clear sections, then one POST STORY button.
+
+export const AUDIENCE = {
+  public: { icon: '🌎', label: 'Public', sub: 'Anyone on Hunch can view it.' },
+  friends: { icon: '👥', label: 'Friends', sub: 'Only your friends.' },
+  team: { icon: '💼', label: 'Team', sub: 'Only your work team. Also shows in the Work feed.' },
+  private: { icon: '🔒', label: 'Private', sub: 'Only you. Kept in your archive.' },
 };
+const TEMPLATES = [
+  { key: 'mood', icon: '😊', label: 'Mood Update', theme: 'sunset', ask: 'mood' },
+  { key: 'location', icon: '📍', label: 'Current Location', theme: 'ocean', ask: 'location' },
+  { key: 'work', icon: '💼', label: 'Work Update', theme: 'midnight', text: 'Work update: ', audience: 'team', team: true },
+  { key: 'travel', icon: '✈️', label: 'Travel', theme: 'ocean', text: 'On the road ✈️ ', ask: 'location' },
+  { key: 'event', icon: '🎉', label: 'Event', theme: 'sunset', text: '🎉 ' },
+  { key: 'achievement', icon: '🏆', label: 'Achievement', theme: 'midnight', text: '🏆 Proud moment: ', mood: 'excited' },
+  { key: 'question', icon: '❓', label: 'Question', theme: 'ocean', text: 'Question for you: ' },
+];
 const RECENT_PLACES = 'hunch_recent_places';
 const readRecent = () => { try { return JSON.parse(localStorage.getItem(RECENT_PLACES) || '[]'); } catch { return []; } };
 const saveRecent = (p) => { try { localStorage.setItem(RECENT_PLACES, JSON.stringify([p, ...readRecent().filter((x) => x.name !== p.name)].slice(0, 5))); } catch { /* ignore */ } };
@@ -23,146 +36,260 @@ export default function StoryComposer({ onClose, onCreated }) {
   const { user, toast } = useApp();
   const ctx = useLoad(() => api('/work/context').catch(() => ({ team: null })), []);
   const team = ctx.data?.team && !ctx.data.overseer ? ctx.data.team : null;
-  const canvas = useRef(null);
-  const fileRef = useRef(null);
+  const musicOn = useLoad(() => api('/music/status').catch(() => ({ enabled: false })), []).data?.enabled;
+  const [step, setStep] = useState('camera'); // camera | edit | compose
   const [file, setFile] = useState(null);
   const [fileUrl, setFileUrl] = useState(null);
   const [theme, setTheme] = useState('ocean');
+  const [effect, setEffect] = useState(null);
   const [mood, setMood] = useState(null);
   const [text, setText] = useState('');
   const [place, setPlace] = useState(null);
-  const [stickers, setStickers] = useState([]);
-  const [drawing, setDrawing] = useState(null); // { strokes } once the user draws
+  const [music, setMusic] = useState(null);
   const [audience, setAudience] = useState('friends');
-  const [target, setTarget] = useState('story'); // 'story' | 'close'
-  const [opts, setOpts] = useState({ allow_replies: true, allow_reactions: true, allow_comments: false, allow_sharing: true, show_on_map: true, archive: true, duration_hours: 24 });
+  const [opts, setOpts] = useState({ allow_replies: true, allow_reactions: true, allow_comments: false, show_on_map: true, archive: true, duration_hours: 24 });
   const [sheet, setSheet] = useState(null);
   const [preview, setPreview] = useState(false);
-  const [moreTools, setMoreTools] = useState(false); // the chevron reveals the extra side buttons
   const [busy, setBusy] = useState(false);
+  const canvas = useRef(null);
   useEffect(() => { if (!file) { setFileUrl(null); return undefined; } const u = URL.createObjectURL(file); setFileUrl(u); return () => URL.revokeObjectURL(u); }, [file]);
-  useEffect(() => { const k = (e) => e.key === 'Escape' && !sheet && !preview && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [sheet, preview]);
+  useEffect(() => {
+    const k = (e) => { if (e.key !== 'Escape' || sheet || preview) return; if (step === 'compose') setStep('edit'); else if (step === 'edit') setStep('camera'); else onClose(); };
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
+  }, [sheet, preview, step]);
 
-  const effectiveAudience = target === 'close' ? 'close_friends' : audience;
-  const work = effectiveAudience === 'team';
-  // Work announcements only make sense on Team Only stories.
-  useEffect(() => { if (!work) setStickers((l) => l.filter((s) => s.type !== 'announcement')); }, [work]);
+  const pickMedia = (f) => { setFile(f); setEffect(null); setStep('edit'); };
+  const applyTemplate = (t) => {
+    setFile(null); setTheme(t.theme);
+    if (t.text) setText(t.text);
+    if (t.mood) setMood(t.mood);
+    if (t.audience === 'team' && team) setAudience('team');
+    setStep('edit');
+    if (t.ask) setSheet(t.ask); else if (t.text) setSheet('caption');
+  };
+  const reset = () => { setFile(null); setText(''); setMood(null); setPlace(null); setMusic(null); setEffect(null); setStep('camera'); };
 
-  const draft = { id: 'draft', user_id: user.id, image: fileUrl, drawn: !!drawing, theme, mood, text, place_name: place?.name, show_on_map: place && opts.show_on_map, stickers: stickers.map((s) => (s.type === 'poll' ? { ...s, counts: s.options.map(() => 0), my_vote: null } : s)), created_at: new Date().toISOString(), allow_replies: opts.allow_replies, allow_reactions: opts.allow_reactions, allow_sharing: opts.allow_sharing, audience: effectiveAudience };
-  const addSticker = (st) => { setStickers((l) => [...l, { pos: { x: 0.18 + Math.random() * 0.2, y: 0.42 + Math.random() * 0.12 }, ...st }]); setSheet(null); };
-
-  async function composite() {
-    // Merge the drawing onto the photo (or template) so the story keeps it.
-    const W = 1080, H = 1920;
-    const c = document.createElement('canvas'); c.width = W; c.height = H;
-    const g = c.getContext('2d');
-    if (fileUrl) {
-      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = fileUrl; });
-      const sc = Math.max(W / img.width, H / img.height);
-      g.drawImage(img, (W - img.width * sc) / 2, (H - img.height * sc) / 2, img.width * sc, img.height * sc);
-    } else {
-      const cols = (themeCss(theme).match(/#[0-9a-f]{6}/gi) || ['#141414', '#3a3a3a']);
-      const grd = g.createLinearGradient(0, 0, W * 0.35, H);
-      cols.forEach((col, i) => grd.addColorStop(i / Math.max(1, cols.length - 1), col));
-      g.fillStyle = grd; g.fillRect(0, 0, W, H);
-    }
-    const box = canvas.current.getBoundingClientRect();
-    g.lineCap = 'round'; g.lineJoin = 'round';
-    for (const s of drawing.strokes) {
-      g.strokeStyle = s.color; g.lineWidth = s.size * (W / box.width);
-      g.beginPath(); s.points.forEach(([x, y], k) => (k ? g.lineTo(x * W, y * H) : g.moveTo(x * W, y * H))); g.stroke();
-    }
-    return new Promise((res) => c.toBlob((b) => res(new File([b], 'story.png', { type: 'image/png' })), 'image/png'));
-  }
+  const draft = {
+    id: 'draft', user_id: user.id, image: fileUrl, effect, theme, mood, text, place_name: place?.name, show_on_map: place && opts.show_on_map && audience !== 'private',
+    music, stickers: [], created_at: new Date().toISOString(), allow_replies: opts.allow_replies, allow_reactions: opts.allow_reactions, audience, team_name: team?.name,
+  };
+  const empty = !fileUrl && !mood && !text.trim();
 
   const post = async () => {
     setBusy(true);
     try {
-      const image = drawing?.strokes.length ? await composite() : file;
       const fields = {
-        image, text, mood, theme, audience: effectiveAudience,
+        image: file, text: text.trim(), mood, theme, audience, effect: fileUrl && effect ? effect : '',
         allow_replies: opts.allow_replies ? '1' : '0', allow_reactions: opts.allow_reactions ? '1' : '0', allow_comments: opts.allow_comments ? '1' : '0',
-        allow_sharing: opts.allow_sharing ? '1' : '0', show_on_map: opts.show_on_map ? '1' : '0', archive: opts.archive || effectiveAudience === 'private' ? '1' : '0',
-        duration_hours: String(opts.duration_hours), stickers: JSON.stringify(stickers),
+        show_on_map: opts.show_on_map && audience !== 'private' ? '1' : '0', archive: opts.archive || audience === 'private' ? '1' : '0',
+        duration_hours: String(opts.duration_hours), ...(music ? { music: JSON.stringify(music) } : {}),
         ...(place ? { place_name: place.name, lat: String(place.lat), lng: String(place.lng) } : {}),
       };
       const s = await api('/stories', { method: 'POST', form: toForm(fields) });
-      toast(effectiveAudience === 'close_friends' ? 'Shared with Close Friends' : effectiveAudience === 'team' ? `Shared with ${team?.name || 'your team'}` : 'Mood Story shared', 'success');
+      toast(audience === 'team' ? `Shared with ${team?.name || 'your team'}` : audience === 'private' ? 'Saved privately' : 'Story posted', 'success');
       onCreated?.(s); onClose();
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
-  const empty = !fileUrl && !mood && !text && !stickers.length && !drawing;
-  const a = AUDIENCE[audience];
 
-  return (
-    <div className="sc-screen" role="dialog" aria-modal="true" aria-label="Create story">
-      <div className="sc-canvas" ref={canvas} style={{ background: fileUrl ? '#000' : themeCss(theme) }}>
-        {fileUrl && <img className="sc-media" src={fileUrl} alt="" />}
-        {!fileUrl && !text && !drawing && !mood && (
-          <button className="sc-add-media" onClick={() => fileRef.current.click()}><Icon name="camera" size={30} /><b>Add photo</b><small>or tap Aa to write a text story</small></button>
-        )}
-        {!fileUrl && (text || mood) && <div className="sc-text-only" onClick={() => setSheet('caption')}>{mood && <span>{moodByKey(mood)?.emoji}</span>}{text}</div>}
-        <DrawLayer active={sheet === 'draw'} value={drawing} onChange={setDrawing} />
-        <StoryOverlays s={fileUrl ? { ...draft, text: '' } : { ...draft, text: '', mood: null }} containerRef={canvas} editable compact
-          onMoveSticker={(i, pos) => setStickers((l) => l.map((st, k) => (k === i ? { ...st, pos } : st)))}
-          onRemoveSticker={(i) => setStickers((l) => l.filter((_, k) => k !== i))} />
-
-        {sheet !== 'draw' && (
-          <>
-            {/* Floating controls, Instagram-style: close top-left, tools down the right side. */}
-            <button className="sc-float sc-close" onClick={onClose} aria-label="Close"><Icon name="close" size={22} /></button>
-            <div className="sc-side" role="toolbar" aria-label="Story tools">
-              <button className={`sc-float ${text ? 'on' : ''}`} onClick={() => setSheet('caption')} aria-label="Text"><span className="aa">Aa</span></button>
-              <button className={`sc-float ${stickers.length ? 'on' : ''}`} onClick={() => setSheet('more')} aria-label="Stickers"><Icon name="sticker" size={22} /></button>
-              <button className={`sc-float ${mood ? 'on' : ''}`} onClick={() => setSheet('mood')} aria-label="Mood">{mood ? <span className="emo">{moodByKey(mood)?.emoji}</span> : <Icon name="smile" size={22} />}</button>
-              <button className={`sc-float ${place ? 'on' : ''}`} onClick={() => setSheet('location')} aria-label="Location"><Icon name="location" size={22} /></button>
-              {moreTools && (
-                <>
-                  <button className={`sc-float ${drawing ? 'on' : ''}`} onClick={() => setSheet('draw')} aria-label="Draw"><Icon name="edit" size={21} /></button>
-                  <button className="sc-float" onClick={() => setSheet('templates')} aria-label="Backgrounds"><Icon name="sparkle" size={21} /></button>
-                  <button className="sc-float" onClick={() => setPreview(true)} disabled={empty} aria-label="Preview story"><Icon name="eye" size={21} /></button>
-                  <button className="sc-float" onClick={() => setSheet('settings')} aria-label="Story settings"><Icon name="settings" size={21} /></button>
-                </>
-              )}
-              <button className="sc-float sc-chev" onClick={() => setMoreTools(!moreTools)} aria-label={moreTools ? 'Fewer tools' : 'More tools'} aria-expanded={moreTools}><Icon name="down" size={20} style={{ transform: moreTools ? 'rotate(180deg)' : 'none' }} /></button>
-            </div>
-            {fileUrl && <button className="sc-caption-in" onClick={() => setSheet('caption')}>{text || 'Add a caption...'}</button>}
-            {fileUrl && <button className="sc-media-btn" onClick={() => fileRef.current.click()} aria-label="Change photo"><Icon name="camera" size={18} /></button>}
-          </>
-        )}
-        {sheet === 'draw' && <DrawTools value={drawing} onChange={setDrawing} onDone={() => setSheet(null)} />}
-      </div>
-      <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { if (e.target.files[0]) setFile(e.target.files[0]); e.target.value = ''; }} />
-
-      <div className="sc-post">
-        <button className={`sc-target ${target === 'story' ? 'on' : ''}`} onClick={() => (target === 'story' ? setSheet('audience') : setTarget('story'))}>
-          <Avatar user={user} size={26} /><span className="lbl"><b>Your story</b><small>{a.icon} {audience === 'team' && team ? team.name : a.label}</small></span>
-        </button>
-        <button className={`sc-target close ${target === 'close' ? 'on' : ''}`} onClick={() => setTarget('close')}><span className="star">★</span> Close Friends</button>
-        <button className="sc-go" onClick={post} disabled={busy || empty} aria-label="Post story">{busy ? <span className="mini-spin" /> : <Icon name="next" size={22} stroke={2.4} />}</button>
-      </div>
-
+  const sheets = (
+    <>
+      {sheet === 'caption' && <CaptionSheet value={text} onClose={() => setSheet(null)} onSave={(v) => { setText(v); setSheet(null); }} />}
       {sheet === 'mood' && <MoodSheet value={mood} onClose={() => setSheet(null)} onPick={(v) => { setMood(v); setSheet(null); }} />}
-      {sheet === 'location' && <LocationSheet value={place} onMap={opts.show_on_map} setOnMap={(v) => setOpts({ ...opts, show_on_map: v })} privateStory={effectiveAudience === 'private'} onClose={() => setSheet(null)} onPick={(p) => { setPlace(p); saveRecent(p); setSheet(null); }} onRemove={() => { setPlace(null); setSheet(null); }} />}
-      {sheet === 'more' && <MoreSheet work={work} onClose={() => setSheet(null)} onTool={(t) => setSheet(t)} onAnnouncement={() => addSticker({ type: 'announcement' })} />}
-      {sheet === 'poll' && <StickerForm title="Poll" onClose={() => setSheet('more')} fields={[['question', 'Ask a question'], ['a', 'Option 1', 'Yes'], ['b', 'Option 2', 'No']]} onDone={(v) => addSticker({ type: 'poll', question: v.question, options: [v.a, v.b] })} />}
-      {sheet === 'question' && <StickerForm title="Question" onClose={() => setSheet('more')} fields={[['prompt', 'Ask me anything', 'Ask me anything']]} onDone={(v) => addSticker({ type: 'question', prompt: v.prompt })} />}
-      {sheet === 'countdown' && <StickerForm title="Countdown" onClose={() => setSheet('more')} fields={[['title', 'Countdown name', 'Team outing'], ['ends_at', 'Ends', '', 'datetime-local']]} onDone={(v) => addSticker({ type: 'countdown', title: v.title, ends_at: new Date(v.ends_at).toISOString() })} />}
-      {sheet === 'link' && <StickerForm title="Link" onClose={() => setSheet('more')} fields={[['url', 'https://', ''], ['label', 'Label (optional)', '']]} onDone={(v) => addSticker({ type: 'link', url: v.url.trim(), label: v.label })} />}
-      {sheet === 'hashtag' && <StickerForm title="Hashtag" onClose={() => setSheet('more')} fields={[['tag', '#hashtag', '']]} onDone={(v) => addSticker({ type: 'hashtag', tag: v.tag.replace(/^#/, '') })} />}
-      {sheet === 'mention' && <MentionSheet onClose={() => setSheet('more')} onPick={(f) => addSticker({ type: 'mention', user_id: f.id, name: f.full_name })} />}
-      {sheet === 'templates' && (
-        <Sheet title="Backgrounds" onClose={() => setSheet(null)}>
-          <p className="small muted" style={{ marginTop: 0 }}>Backgrounds for text and mood stories.</p>
-          <div className="sc-templates">{THEMES.map((t) => <button key={t.key} className={theme === t.key && !fileUrl ? 'on' : ''} style={{ background: t.css }} onClick={() => { setTheme(t.key); setFile(null); setSheet(null); }}><span>{t.label}</span></button>)}</div>
-        </Sheet>
-      )}
-      {sheet === 'caption' && <CaptionSheet value={text} team={team} work={work} onClose={() => setSheet(null)} onSave={(v) => { setText(v); setSheet(null); }} onMention={() => setSheet('mention')} onWorkTag={() => { setAudience('team'); setTarget('story'); }} />}
-      {sheet === 'audience' && <AudienceSheet value={audience} team={team} onClose={() => setSheet(null)} onPick={(v) => { setAudience(v); if (v !== 'close_friends') setTarget('story'); setSheet(null); }} onEditClose={() => setSheet('close-list')} />}
-      {sheet === 'close-list' && <CloseFriendsSheet onClose={() => setSheet('audience')} />}
-      {sheet === 'settings' && <SettingsSheet opts={opts} setOpts={setOpts} audience={audience} team={team} onAudience={() => setSheet('audience')} onClose={() => setSheet(null)} />}
+      {sheet === 'location' && <LocationSheet value={place} onMap={opts.show_on_map} setOnMap={(v) => setOpts({ ...opts, show_on_map: v })} privateStory={audience === 'private'}
+        onClose={() => setSheet(null)} onPick={(p) => { setPlace(p); saveRecent(p); setSheet(null); }} onRemove={() => { setPlace(null); setSheet(null); }} />}
+      {sheet === 'music' && <MusicSheet value={music} onClose={() => setSheet(null)} onPick={(m) => { setMusic(m); setSheet(null); }} onRemove={() => { setMusic(null); setSheet(null); }} />}
+      {sheet === 'effects' && <EffectsSheet fileUrl={fileUrl} effect={effect} theme={theme} onEffect={setEffect} onTheme={setTheme} onClose={() => setSheet(null)} />}
+      {sheet === 'more' && <MoreSheet opts={opts} setOpts={setOpts} hasPhoto={!!fileUrl} onRemovePhoto={() => { setFile(null); setSheet(null); }} onClear={() => { reset(); setSheet(null); }} onClose={() => setSheet(null)} />}
+      {sheet === 'settings' && <AudienceSheet audience={audience} setAudience={setAudience} opts={opts} setOpts={setOpts} team={team} hasPlace={!!place} onClose={() => setSheet(null)} />}
       {preview && <StoryViewer preview groups={[{ user, stories: [draft] }]} onClose={() => setPreview(false)} />}
+    </>
+  );
+
+  if (step === 'camera') {
+    return (
+      <div className="sc-screen hs" role="dialog" aria-modal="true" aria-label="Create story">
+        <Camera team={team} onClose={onClose} onMedia={pickMedia} onTemplate={applyTemplate} />
+        {sheets}
+      </div>
+    );
+  }
+
+  if (step === 'compose') {
+    return (
+      <div className="hs-compose" role="dialog" aria-modal="true" aria-label="Post story">
+        <div className="hs-top solid">
+          <button className="icon-btn" onClick={() => setStep('edit')} aria-label="Back to editor"><Icon name="back" /></button>
+          <h2>New story</h2>
+          <span style={{ width: 40 }} />
+        </div>
+        <div className="hs-sections">
+          <section className="hs-sec hs-preview-sec">
+            <button className="hs-thumb" onClick={() => setPreview(true)} aria-label="Preview story" style={{ background: fileUrl ? '#000' : themeCss(theme) }}>
+              {fileUrl ? <img src={fileUrl} alt="" style={{ filter: effectCss(effect) }} /> : <span>{moodByKey(mood)?.emoji}<br />{text}</span>}
+              <i><Icon name="eye" size={14} /> Preview</i>
+            </button>
+            <div className="hs-sum">
+              <b>{AUDIENCE[audience].icon} {audience === 'team' && team ? team.name : AUDIENCE[audience].label}</b>
+              <small>{AUDIENCE[audience].sub}</small>
+              <small>Disappears after {opts.duration_hours} hours{opts.archive ? ' · saved to archive' : ''}</small>
+            </div>
+          </section>
+          <section className="hs-sec">
+            <h4>Caption</h4>
+            <textarea className="input" rows={2} value={text} maxLength={500} placeholder="Tell your story..." onChange={(e) => setText(e.target.value)} />
+          </section>
+          <section className="hs-sec">
+            <h4>😊 Mood</h4>
+            <div className="hs-chiprow">
+              {MOODS.map((x) => <button key={x.key} className={mood === x.key ? 'on' : ''} onClick={() => setMood(mood === x.key ? null : x.key)}>{x.emoji} {x.label}</button>)}
+            </div>
+          </section>
+          <section className="hs-sec">
+            <h4>📍 Location</h4>
+            <button className="hs-pick" onClick={() => setSheet('location')}>
+              {place ? <><b>{place.name}</b><small>{opts.show_on_map && audience !== 'private' ? 'Shown on Map Discovery' : 'Not on the Map'}</small></> : <span className="muted">Add a location</span>}
+              <Icon name="next" size={16} />
+            </button>
+          </section>
+          {(musicOn || music) && (
+            <section className="hs-sec">
+              <h4>🎵 Music</h4>
+              <button className="hs-pick" onClick={() => setSheet('music')}>
+                {music ? <><b>{music.title}</b><small>{music.artist} · {mmss(music.duration)}</small></> : <span className="muted">Add music</span>}
+                <Icon name="next" size={16} />
+              </button>
+            </section>
+          )}
+          <section className="hs-sec">
+            <h4>Audience</h4>
+            <AudienceChoices audience={audience} setAudience={setAudience} team={team} />
+            <Toggles opts={opts} setOpts={setOpts} hasPlace={!!place} audience={audience} />
+          </section>
+        </div>
+        <div className="hs-postbar">
+          <button className="hs-post" onClick={post} disabled={busy || empty}>{busy ? <span className="mini-spin" /> : 'POST STORY'}</button>
+        </div>
+        {sheets}
+      </div>
+    );
+  }
+
+  // Editor
+  const tools = [
+    ['caption', <span className="aa" key="a">Aa</span>, 'Text', !!text],
+    ['mood', mood ? <span className="emo" key="m">{moodByKey(mood)?.emoji}</span> : <Icon name="smile" size={22} key="m" />, 'Mood', !!mood],
+    ['location', <Icon name="location" size={22} key="l" />, 'Location', !!place],
+    ...(musicOn ? [['music', <span className="emo" key="mu">🎵</span>, 'Music', !!music]] : []),
+    ['effects', <Icon name="sparkle" size={21} key="e" />, 'Effects', !!effect],
+    ['more', <Icon name="more" size={22} key="o" />, 'More', false],
+  ];
+  return (
+    <div className="sc-screen hs" role="dialog" aria-modal="true" aria-label="Edit story">
+      <div className="sc-canvas" ref={canvas} style={{ background: fileUrl ? '#000' : themeCss(theme) }}>
+        {fileUrl ? <img className="sc-media" src={fileUrl} alt="" style={{ filter: effectCss(effect) }} /> : (
+          <button className="hs-textstory" onClick={() => setSheet('caption')}>
+            {mood && <span className="e">{moodByKey(mood)?.emoji}</span>}
+            {text ? <span>{text}</span> : <span className="ph">Tap to write your story</span>}
+          </button>
+        )}
+        <StoryOverlays s={fileUrl ? draft : { ...draft, mood: null }} containerRef={canvas} compact actions={{ onPiece: (k) => setSheet(k === 'caption' ? 'caption' : k) }} />
+        <div className="hs-top">
+          <button className="sc-float" onClick={() => setStep('camera')} aria-label="Back to camera"><Icon name="back" size={22} /></button>
+          <button className="hs-title" onClick={() => setPreview(true)} disabled={empty}>Story Preview</button>
+          <button className="sc-float" onClick={() => setSheet('settings')} aria-label="Story settings"><Icon name="settings" size={21} /></button>
+        </div>
+        <div className="hs-tools" role="toolbar" aria-label="Story tools">
+          {tools.map(([k, icon, label, on]) => (
+            <button key={k} className={`sc-float ${on ? 'on' : ''}`} onClick={() => setSheet(k)} aria-label={label} title={label}>{icon}</button>
+          ))}
+        </div>
+      </div>
+      <div className="hs-editbar">
+        <span className="hs-aud"><Avatar user={user} size={26} /> {AUDIENCE[audience].icon} {audience === 'team' && team ? team.name : AUDIENCE[audience].label}</span>
+        <button className="hs-next" onClick={() => setStep('compose')} disabled={empty}>Next <Icon name="next" size={18} /></button>
+      </div>
+      {sheets}
     </div>
+  );
+}
+
+/** Live camera with gallery, capture and camera switch. Falls back to the gallery if the camera is blocked. */
+function Camera({ team, onClose, onMedia, onTemplate }) {
+  const video = useRef(null);
+  const gallery = useRef(null);
+  const stream = useRef(null);
+  const [facing, setFacing] = useState('environment');
+  const [state, setState] = useState('starting'); // starting | live | blocked | none
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const start = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) { setState('none'); return; }
+      setState('starting');
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1080 }, height: { ideal: 1920 } }, audio: false });
+        if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
+        stream.current = s;
+        if (video.current) { video.current.srcObject = s; await video.current.play().catch(() => {}); }
+        setState('live');
+      } catch (e) { setState(e?.name === 'NotAllowedError' ? 'blocked' : 'none'); }
+    };
+    start();
+    return () => { cancelled = true; stream.current?.getTracks().forEach((t) => t.stop()); stream.current = null; };
+  }, [facing]);
+
+  const capture = () => {
+    const v = video.current;
+    if (!v || state !== 'live' || !v.videoWidth) return;
+    const c = document.createElement('canvas');
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    const g = c.getContext('2d');
+    if (facing === 'user') { g.translate(c.width, 0); g.scale(-1, 1); } // keep selfies as you saw them
+    g.drawImage(v, 0, 0);
+    setFlash(true); setTimeout(() => setFlash(false), 180);
+    c.toBlob((b) => b && onMedia(new File([b], 'story.jpg', { type: 'image/jpeg' })), 'image/jpeg', 0.92);
+  };
+
+  const templates = TEMPLATES.filter((t) => !t.team || team);
+  return (
+    <div className="hs-camera">
+      <div className="hs-viewfinder">
+        <video ref={video} playsInline muted className={facing === 'user' ? 'mirror' : ''} style={{ opacity: state === 'live' ? 1 : 0 }} />
+        {state !== 'live' && (
+          <div className="hs-camstate">
+            {state === 'starting' ? <Spinner /> : (
+              <>
+                <Icon name="camera" size={34} />
+                <b>{state === 'blocked' ? 'Camera access is off' : 'No camera available'}</b>
+                <small>{state === 'blocked' ? 'Allow camera access for Hunch in your browser settings, or pick a photo from your gallery.' : 'Pick a photo from your gallery or start from a template.'}</small>
+                <button className="hs-pill" onClick={() => gallery.current.click()}><Icon name="image" size={17} /> Open gallery</button>
+              </>
+            )}
+          </div>
+        )}
+        {flash && <div className="hs-flash" />}
+        <button className="sc-float hs-x" onClick={onClose} aria-label="Close"><Icon name="close" size={22} /></button>
+      </div>
+      <div className="hs-templates" aria-label="Story templates">
+        <button onClick={() => onTemplate({ key: 'text', theme: 'midnight' })}><span>Aa</span>Text</button>
+        {templates.map((t) => <button key={t.key} onClick={() => onTemplate(t)}><span>{t.icon}</span>{t.label}</button>)}
+      </div>
+      <div className="hs-shutterbar">
+        <button className="hs-side-btn" onClick={() => gallery.current.click()} aria-label="Gallery"><Icon name="image" size={22} /><small>Gallery</small></button>
+        <button className="hs-shutter" onClick={capture} disabled={state !== 'live'} aria-label="Capture photo"><i /></button>
+        <button className="hs-side-btn" onClick={() => setFacing(facing === 'user' ? 'environment' : 'user')} disabled={state === 'none' || state === 'blocked'} aria-label="Switch camera"><Icon name="refresh" size={22} /><small>Switch</small></button>
+      </div>
+      <input ref={gallery} type="file" accept="image/*" hidden onChange={(e) => { if (e.target.files[0]) onMedia(e.target.files[0]); e.target.value = ''; }} />
+    </div>
+  );
+}
+
+function CaptionSheet({ value, onSave, onClose }) {
+  const [v, setV] = useState(value);
+  return (
+    <Sheet title="Caption" onClose={onClose} footer={<button className="btn block" onClick={() => onSave(v.trim())}>Done</button>}>
+      <textarea className="input" rows={4} autoFocus placeholder="Tell your story..." value={v} maxLength={500} onChange={(e) => setV(e.target.value)} />
+    </Sheet>
   );
 }
 
@@ -170,7 +297,7 @@ function MoodSheet({ value, onPick, onClose }) {
   return (
     <Sheet title="How are you feeling?" onClose={onClose}>
       <div className="sc-moods">{MOODS.map((x) => <button key={x.key} className={value === x.key ? 'on' : ''} onClick={() => onPick(value === x.key ? null : x.key)}><span>{x.emoji}</span>{x.label}</button>)}</div>
-      <p className="small muted" style={{ textAlign: 'center', marginBottom: 0 }}>Your mood shows as a badge on your story.</p>
+      <p className="small muted" style={{ textAlign: 'center', marginBottom: 0 }}>Shows as “Feeling …” on your story.</p>
     </Sheet>
   );
 }
@@ -185,8 +312,8 @@ function LocationSheet({ value, onPick, onRemove, onClose, onMap, setOnMap, priv
   };
   return (
     <Sheet title="Location" onClose={onClose} footer={value && <button className="btn ghost block" onClick={onRemove}>Remove location</button>}>
-      <label className="toggle-row"><span><b>📍 Add to Map Discovery</b><small>{privateStory ? 'Private stories never appear on the Map.' : 'Friends who can see this story can find it on the Map.'}</small></span><input type="checkbox" className="switch" checked={!!onMap && !privateStory} disabled={privateStory} onChange={(e) => setOnMap(e.target.checked)} /></label>
-      <button className="place-row" onClick={here} disabled={busy}><span className="pin-ic blue"><Icon name="crosshair" size={17} /></span><span className="meta"><b>{busy ? 'Finding you…' : 'Current location'}</b><small>Uses your browser’s location</small></span></button>
+      <label className="toggle-row"><span><b>📍 Map Discovery</b><small>{privateStory ? 'Private stories never appear on the Map.' : 'People who can see this story can find it on the Hunch Map.'}</small></span><input type="checkbox" className="switch" checked={!!onMap && !privateStory} disabled={privateStory} onChange={(e) => setOnMap(e.target.checked)} /></label>
+      <button className="place-row" onClick={here} disabled={busy}><span className="pin-ic blue"><Icon name="crosshair" size={17} /></span><span className="meta"><b>{busy ? 'Finding you…' : 'Current location'}</b><small>Uses your device location</small></span></button>
       {recent.length > 0 && <div className="sc-label">Recent places</div>}
       {recent.map((p) => <button key={p.name} className="place-row" onClick={() => onPick(p)}><span className="pin-ic"><Icon name="clock" size={16} /></span><span className="meta"><b>{p.name}</b><small>{p.display || 'Recently used'}</small></span></button>)}
       <div className="sc-label">Search location</div>
@@ -195,166 +322,106 @@ function LocationSheet({ value, onPick, onRemove, onClose, onMap, setOnMap, priv
   );
 }
 
-function MoreSheet({ work, onTool, onAnnouncement, onClose }) {
-  const tools = [['poll', '📊', 'Poll'], ['question', '❓', 'Question'], ['countdown', '⏳', 'Countdown'], ['gif', '🎞️', 'GIF'], ['mention', '@', 'Mention'], ['link', '🔗', 'Link'],
-    ['hashtag', '#', 'Hashtag'], ['announcement', '📣', 'Work Announcement']];
-  return (
-    <Sheet title="Stickers" onClose={onClose}>
-      <div className="sc-more">
-        {tools.map(([k, e, l]) => {
-          const disabled = (k === 'announcement' && !work) || k === 'gif';
-          return (
-            <button key={k} disabled={disabled} onClick={() => (k === 'announcement' ? onAnnouncement() : onTool(k))}>
-              <span className="e">{e}</span><span>{l}</span>
-              {k === 'gif' && <small>Needs a GIF API key</small>}
-              {k === 'announcement' && !work && <small>Team Only stories</small>}
-            </button>
-          );
-        })}
-      </div>
-    </Sheet>
-  );
-}
-
-function StickerForm({ title, fields, onDone, onClose }) {
-  const [v, setV] = useState(Object.fromEntries(fields.map(([k, , d = '']) => [k, d])));
-  const ok = fields.every(([k, , , type]) => String(v[k]).trim() || k === 'label' || (type === undefined && false)) && fields.filter(([k]) => k !== 'label').every(([k]) => String(v[k]).trim());
-  return (
-    <Sheet title={title} onClose={onClose} footer={<button className="btn block" disabled={!ok} onClick={() => onDone(v)}>Add to story</button>}>
-      {fields.map(([k, ph, , type]) => (
-        <input key={k} className="input" style={{ marginBottom: 10 }} type={type || 'text'} placeholder={ph} value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value })} maxLength={type ? undefined : 300} autoFocus={k === fields[0][0]} />
-      ))}
-    </Sheet>
-  );
-}
-
-function MentionSheet({ onPick, onClose }) {
-  const friends = useLoad(() => api('/friends'), []);
+/** Music from Freesound (searched through the Hunch API). Tap ▶ to listen, tap a track to use it. */
+function MusicSheet({ value, onPick, onRemove, onClose }) {
   const [q, setQ] = useState('');
+  const [res, setRes] = useState(null);
+  const [playing, setPlaying] = useState(null);
+  const audio = useRef(null);
+  const search = async (term) => {
+    setRes(null);
+    try { setRes(await api(`/music/search?q=${encodeURIComponent(term)}`)); } catch (e) { setRes({ error: e.message, tracks: [] }); }
+  };
+  useEffect(() => { search('chill'); return () => audio.current?.pause(); }, []);
+  const listen = (t) => {
+    if (playing === t.id) { audio.current.pause(); setPlaying(null); return; }
+    audio.current.src = t.url; audio.current.play().catch(() => {}); setPlaying(t.id);
+  };
   return (
-    <Sheet title="Mention a friend" onClose={onClose}>
-      <div className="search-bar sc-search"><Icon name="search" size={18} /><input placeholder="Search friends" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
-      {(friends.data || []).filter((f) => f.full_name.toLowerCase().includes(q.toLowerCase())).slice(0, 30).map((f) => (
-        <button key={f.id} className="row-item" style={{ width: '100%', background: 'none', border: 0, textAlign: 'left' }} onClick={() => onPick(f)}><Avatar user={f} size={38} /><div className="meta"><div className="title">{f.full_name}</div></div></button>
+    <Sheet title="Music" onClose={onClose} footer={value && <button className="btn ghost block" onClick={onRemove}>Remove music</button>}>
+      <form className="search-bar sc-search" onSubmit={(e) => { e.preventDefault(); search(q || 'chill'); }}>
+        <Icon name="search" size={18} /><input placeholder="Search music, e.g. night walk" value={q} onChange={(e) => setQ(e.target.value)} />
+      </form>
+      <div className="hs-chiprow" style={{ margin: '10px 0' }}>{['Chill', 'Happy', 'Lo-fi', 'Acoustic', 'Upbeat', 'Piano'].map((g) => <button key={g} onClick={() => { setQ(g); search(g); }}>{g}</button>)}</div>
+      <audio ref={audio} onEnded={() => setPlaying(null)} />
+      {!res ? <Spinner /> : res.error ? <p className="small muted">{res.error}</p> : !res.tracks.length ? <p className="small muted">No tracks found.</p> : res.tracks.map((t) => (
+        <div key={t.id} className={`hs-track ${value?.id === t.id ? 'on' : ''}`}>
+          <button className="play" onClick={() => listen(t)} aria-label={playing === t.id ? 'Pause' : 'Play'}>{playing === t.id ? '❚❚' : '▶'}</button>
+          <button className="meta" onClick={() => { audio.current.pause(); onPick({ id: t.id, title: t.title, artist: t.artist, url: t.url, duration: t.duration }); }}>
+            <b>{t.title}</b><small>{t.artist} · {mmss(t.duration)}</small>
+          </button>
+        </div>
       ))}
+      <p className="small muted" style={{ marginBottom: 0 }}>Music by Freesound creators.</p>
     </Sheet>
   );
 }
 
-function CaptionSheet({ value, team, work, onSave, onMention, onWorkTag, onClose }) {
-  const [v, setV] = useState(value);
-  const add = (s) => setV((x) => `${x}${x && !x.endsWith(' ') ? ' ' : ''}${s}`);
-  const tags = ['#MoodToday', '#Weekend', '#Grateful', ...(team ? [`#${team.name.replace(/\s+/g, '')}`] : [])];
+function EffectsSheet({ fileUrl, effect, theme, onEffect, onTheme, onClose }) {
   return (
-    <Sheet title="Tell your story" onClose={onClose} footer={<button className="btn block" onClick={() => onSave(v.trim())}>Done</button>}>
-      <textarea className="input" rows={4} autoFocus placeholder="Tell your story..." value={v} maxLength={500} onChange={(e) => setV(e.target.value)} />
-      <div className="sc-label">Hashtags</div>
-      <div className="sc-chips">{tags.map((t) => <button key={t} onClick={() => add(t)}>{t}</button>)}</div>
-      <div className="sc-label">Add</div>
-      <div className="sc-chips">
-        <button onClick={() => { onSave(v.trim()); onMention(); }}>@ Mention a friend</button>
-        {team && <button className={work ? 'on' : ''} onClick={onWorkTag}>💼 Work tag · {team.name}</button>}
-      </div>
+    <Sheet title={fileUrl ? 'Effects' : 'Background'} onClose={onClose} footer={<button className="btn block" onClick={onClose}>Done</button>}>
+      {fileUrl ? (
+        <div className="hs-effects">
+          {STORY_EFFECTS.map((e) => (
+            <button key={e.label} className={effect === e.key ? 'on' : ''} onClick={() => onEffect(e.key)}>
+              <img src={fileUrl} alt="" style={{ filter: e.css }} /><span>{e.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="sc-templates">{THEMES.map((t) => <button key={t.key} className={theme === t.key ? 'on' : ''} style={{ background: t.css }} onClick={() => onTheme(t.key)}><span>{t.label}</span></button>)}</div>
+      )}
     </Sheet>
   );
 }
 
-function AudienceSheet({ value, team, onPick, onEditClose, onClose }) {
-  const close = useLoad(() => api('/close-friends'), []);
+function MoreSheet({ opts, setOpts, hasPhoto, onRemovePhoto, onClear, onClose }) {
   return (
-    <Sheet title="Story audience" onClose={onClose}>
+    <Sheet title="More" onClose={onClose} footer={<button className="btn block" onClick={onClose}>Done</button>}>
+      <div className="sc-label" style={{ marginTop: 0 }}>Story duration</div>
+      <div className="seg">{[6, 12, 24].map((h) => <button key={h} className={opts.duration_hours === h ? 'active' : ''} onClick={() => setOpts({ ...opts, duration_hours: h })}>{h} hours</button>)}</div>
+      <label className="toggle-row"><span><b>Save to archive</b><small>Keep it in your story archive after it disappears.</small></span><input type="checkbox" className="switch" checked={!!opts.archive} onChange={(e) => setOpts({ ...opts, archive: e.target.checked })} /></label>
+      {hasPhoto && <button className="btn ghost block" style={{ marginTop: 8 }} onClick={onRemovePhoto}>Use a background instead of the photo</button>}
+      <button className="btn ghost block" style={{ marginTop: 8 }} onClick={onClear}>Start over</button>
+    </Sheet>
+  );
+}
+
+function AudienceChoices({ audience, setAudience, team }) {
+  return (
+    <div className="hs-aud-grid" role="radiogroup" aria-label="Story visibility">
       {Object.entries(AUDIENCE).map(([k, a]) => {
         const disabled = k === 'team' && !team;
         return (
-          <button key={k} className={`choice-card ${value === k ? 'on' : ''}`} disabled={disabled} style={disabled ? { opacity: 0.5 } : undefined} onClick={() => onPick(k)}>
-            <span style={{ fontSize: 22 }}>{a.icon}</span>
-            <span><b>{k === 'team' && team ? `Team Only · ${team.name}` : a.label}</b><small>{disabled ? 'You aren’t on a team yet.' : k === 'close_friends' ? `${close.data?.length ?? '…'} people. ${a.sub}` : a.sub}</small></span>
-            <span className="radio" />
+          <button key={k} role="radio" aria-checked={audience === k} className={audience === k ? 'on' : ''} disabled={disabled} onClick={() => setAudience(k)}>
+            <span className="i">{a.icon}</span><b>{k === 'team' && team ? team.name : a.label}</b><small>{disabled ? 'Not on a team' : a.sub}</small>
           </button>
         );
       })}
-      <button className="btn ghost block" onClick={onEditClose}>⭐ Edit Close Friends list</button>
-    </Sheet>
+    </div>
   );
 }
 
-function CloseFriendsSheet({ onClose }) {
-  const { toast } = useApp();
-  const friends = useLoad(() => api('/friends'), []);
-  const [ids, setIds] = useState(null);
-  useEffect(() => { api('/close-friends').then(setIds); }, []);
-  const save = async () => { await api('/close-friends', { method: 'PUT', body: { ids } }); toast('Close Friends updated', 'success'); onClose(); };
-  return (
-    <Sheet title="Close Friends" onClose={onClose} footer={<button className="btn block" disabled={!ids} onClick={save}>Save{ids ? ` (${ids.length})` : ''}</button>}>
-      <p className="small muted" style={{ marginTop: 0 }}>Only these people see stories you share to Close Friends. Nobody is notified when you change the list.</p>
-      {!ids || !friends.data ? <Spinner /> : friends.data.map((f) => (
-        <div key={f.id} className={`check-row ${ids.includes(f.id) ? 'on' : ''}`} onClick={() => setIds(ids.includes(f.id) ? ids.filter((x) => x !== f.id) : [...ids, f.id])}>
-          <Avatar user={f} size={38} /><div style={{ flex: 1, fontWeight: 600 }}>{f.full_name}</div><span className="box"><Icon name="check" size={14} /></span>
-        </div>
-      ))}
-    </Sheet>
+function Toggles({ opts, setOpts, hasPlace, audience }) {
+  const T = ({ k, label, sub, disabled }) => (
+    <label className="toggle-row"><span><b>{label}</b>{sub && <small>{sub}</small>}</span><input type="checkbox" className="switch" checked={!!opts[k] && !disabled} disabled={disabled} onChange={(e) => setOpts({ ...opts, [k]: e.target.checked })} /></label>
   );
-}
-
-function SettingsSheet({ opts, setOpts, audience, team, onAudience, onClose }) {
-  const T = ({ k, label, sub }) => (
-    <label className="toggle-row"><span><b>{label}</b>{sub && <small>{sub}</small>}</span><input type="checkbox" className="switch" checked={!!opts[k]} onChange={(e) => setOpts({ ...opts, [k]: e.target.checked })} /></label>
-  );
-  const a = AUDIENCE[audience];
   return (
-    <Sheet title="Story settings" onClose={onClose} footer={<button className="btn block" onClick={onClose}>Done</button>}>
-      <button className="row-item sc-setting" onClick={onAudience}><span style={{ fontSize: 20 }}>{a.icon}</span><div className="meta"><div className="title">Story privacy</div><div className="sub">{audience === 'team' && team ? `Team Only · ${team.name}` : a.label}</div></div><Icon name="next" size={16} /></button>
+    <div className="hs-toggles">
       <T k="allow_replies" label="Allow replies" sub="Replies go to your private chat." />
       <T k="allow_reactions" label="Allow reactions" />
-      <T k="allow_comments" label="Allow comments" sub="Public comments under your story." />
-      <T k="allow_sharing" label="Allow sharing" sub="Viewers can send your story to a chat." />
-      <T k="show_on_map" label="Show location on Map" sub="Only when you add a location." />
-      <T k="archive" label="Save to archive" sub="Keep it in your story archive after it disappears." />
-      <div className="sc-label">Story duration</div>
-      <div className="seg">{[6, 12, 24].map((h) => <button key={h} className={opts.duration_hours === h ? 'active' : ''} onClick={() => setOpts({ ...opts, duration_hours: h })}>{h} hours</button>)}</div>
-    </Sheet>
+      <T k="allow_comments" label="Allow comments" sub="Comments under your story." />
+      <T k="show_on_map" label="Allow Map Discovery" sub={audience === 'private' ? 'Private stories never appear on the Map.' : hasPlace ? 'Your story appears at its location on the Map.' : 'Add a location to use this.'} disabled={audience === 'private' || !hasPlace} />
+    </div>
   );
 }
 
-/** Freehand drawing stored as normalised strokes; merged into the image when posting. */
-function DrawLayer({ active, value, onChange }) {
-  const ref = useRef(null);
-  const color = useRef('#ffffff');
-  const size = useRef(6);
-  useEffect(() => {
-    const c = ref.current; if (!c) return;
-    const r = c.getBoundingClientRect(); c.width = r.width * 2; c.height = r.height * 2;
-    const g = c.getContext('2d'); g.scale(2, 2); g.lineCap = 'round'; g.lineJoin = 'round';
-    for (const s of value?.strokes || []) { g.strokeStyle = s.color; g.lineWidth = s.size; g.beginPath(); s.points.forEach(([x, y], k) => (k ? g.lineTo(x * r.width, y * r.height) : g.moveTo(x * r.width, y * r.height))); g.stroke(); }
-  }, [value]);
-  DrawLayer.setColor = (c) => { color.current = c; };
-  DrawLayer.setSize = (s) => { size.current = s; };
-  const down = (e) => {
-    if (!active) return;
-    const c = ref.current; const r = c.getBoundingClientRect();
-    const pt = (ev) => [(ev.clientX - r.left) / r.width, (ev.clientY - r.top) / r.height];
-    const stroke = { color: color.current, size: size.current, points: [pt(e)] };
-    const g = c.getContext('2d');
-    c.setPointerCapture?.(e.pointerId);
-    const move = (ev) => {
-      const p = pt(ev); const last = stroke.points.at(-1); stroke.points.push(p);
-      g.strokeStyle = stroke.color; g.lineWidth = stroke.size; g.beginPath(); g.moveTo(last[0] * r.width, last[1] * r.height); g.lineTo(p[0] * r.width, p[1] * r.height); g.stroke();
-    };
-    const up = () => { c.removeEventListener('pointermove', move); c.removeEventListener('pointerup', up); onChange({ strokes: [...(value?.strokes || []), stroke] }); };
-    c.addEventListener('pointermove', move); c.addEventListener('pointerup', up);
-  };
-  return <canvas ref={ref} className={`sc-draw ${active ? 'active' : ''}`} onPointerDown={down} />;
-}
-function DrawTools({ value, onChange, onDone }) {
-  const [c, setC] = useState('#ffffff');
-  const [s, setS] = useState(6);
-  const COLORS = ['#ffffff', '#111111', '#5b8def', '#ff4d67', '#ffc83d', '#3ddc84'];
+function AudienceSheet({ audience, setAudience, opts, setOpts, team, hasPlace, onClose }) {
   return (
-    <div className="sc-drawtools" onPointerDown={(e) => e.stopPropagation()}>
-      {COLORS.map((x) => <button key={x} className={c === x ? 'on' : ''} style={{ background: x }} onClick={() => { setC(x); DrawLayer.setColor(x); }} aria-label={`Colour ${x}`} />)}
-      <button className="sz" onClick={() => { const n = s === 6 ? 12 : s === 12 ? 3 : 6; setS(n); DrawLayer.setSize(n); }} aria-label="Brush size">{s === 3 ? 'S' : s === 6 ? 'M' : 'L'}</button>
-      <button className="txt" disabled={!value?.strokes.length} onClick={() => onChange(value.strokes.length > 1 ? { strokes: value.strokes.slice(0, -1) } : null)}>Undo</button>
-      <button className="txt done" onClick={onDone}>Done</button>
-    </div>
+    <Sheet title="Story settings" onClose={onClose} footer={<button className="btn block" onClick={onClose}>Done</button>}>
+      <div className="sc-label" style={{ marginTop: 0 }}>Visibility</div>
+      <AudienceChoices audience={audience} setAudience={setAudience} team={team} />
+      <Toggles opts={opts} setOpts={setOpts} hasPlace={hasPlace} audience={audience} />
+    </Sheet>
   );
 }

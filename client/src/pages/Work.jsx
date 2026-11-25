@@ -6,6 +6,7 @@ import { api, toForm } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, Sheet, Spinner, Empty, Confirm, FilePreviews, timeAgo } from '../components/ui.jsx';
 import { PostCard } from '../components/Post.jsx';
+import { StoryBar, StoryViewer } from '../components/Stories.jsx';
 
 /** Home → Work: the team's private workspace (feed, schedule, team, mood). */
 export default function WorkTab({ initialView }) {
@@ -46,6 +47,22 @@ export default function WorkTab({ initialView }) {
   );
 }
 
+/** Team-visibility stories, shown at the top of the team's Work feed. */
+function WorkStories({ teamId }) {
+  const [groups, setGroups] = useState([]);
+  const [viewer, setViewer] = useState(null);
+  const load = () => api(`/work/stories?team=${teamId}`).then(setGroups).catch(() => setGroups([]));
+  useEffect(() => { load(); }, [teamId]);
+  if (!groups.length) return null;
+  return (
+    <div className="work-stories">
+      <div className="sc-label" style={{ margin: '4px 16px 6px' }}>💼 Team stories</div>
+      <StoryBar groups={groups} onOpen={setViewer} hideAdd />
+      {viewer !== null && <StoryViewer groups={groups} startGroup={viewer} onClose={() => { setViewer(null); load(); }} onChanged={load} />}
+    </div>
+  );
+}
+
 function WorkFeed({ ctx, onCtx }) {
   const { user, toast } = useApp();
   const [data, setData] = useState(null);
@@ -62,6 +79,7 @@ function WorkFeed({ ctx, onCtx }) {
   const req = ctx.myRequest;
   return (
     <>
+      <WorkStories teamId={ctx.team.id} />
       {ctx.canPost ? (
         <button className="composer-trigger work-compose" onClick={() => setComposing(true)}>
           <Avatar user={user} size={32} /><span style={{ flex: 1 }}>{ctx.canManage ? 'Post an update or announcement…' : 'Share something with your team…'}</span><Icon name="image" />

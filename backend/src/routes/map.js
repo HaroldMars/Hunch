@@ -83,7 +83,8 @@ r.get('/map/overview', h((req, res) => {
   const ids = [me, ...friends];
   const ph = ids.map(() => '?').join(',');
   // Location-tagged stories that are still live (own ones always, friends' only if they share location).
-  const stories = all(`SELECT * FROM stories WHERE user_id IN (${ph}) AND lat IS NOT NULL AND show_on_map = 1 AND audience <> 'private' AND expires_at > ? ORDER BY id DESC LIMIT 400`, ...ids, nowIso())
+  // Friends' map stories, plus Public stories anyone put on Map Discovery.
+  const stories = all(`SELECT * FROM stories WHERE (user_id IN (${ph}) OR audience = 'public') AND lat IS NOT NULL AND show_on_map = 1 AND audience <> 'private' AND expires_at > ? ORDER BY id DESC LIMIT 400`, ...ids, nowIso())
     .filter((s) => canSeeStory(s, me))
     .map((s) => ({ ...storyOut(s, me), user: publicUser(s.user_id) }));
   const people = all(`SELECT * FROM user_locations WHERE user_id IN (${ph})`, ...ids).map((l) => ({ ...l, user: publicUser(l.user_id), me: l.user_id === me }));

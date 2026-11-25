@@ -5,6 +5,7 @@ import { auth } from '../auth.js';
 import { h, fail, imageUpload, fileUrl, publicUser, nowIso, localDay, addDays } from '../util.js';
 import { notify } from '../notify.js';
 import { hydratePosts, hydratePost } from './posts.js';
+import { storyOut } from './stories.js';
 import { POSITIVE, LOW_ENERGY, NEGATIVE } from '../analytics.js';
 import {
   teamOf, isOverseer, workTeams, teamLeader, canAccessTeam, canManageTeam, canPostInTeam, teamSettings, postPermission, teamMemberIds, resolveTeam, teamName, teamRow,
@@ -51,6 +52,19 @@ r.get('/work/context', h((req, res) => {
     myRequest: postPermission(t, req.user.id) || null,
     pendingRequests: canManageTeam(req.user, t) ? get("SELECT COUNT(*) c FROM post_permissions WHERE team_id = ? AND status = 'pending'", t).c : 0,
   });
+}));
+
+// ---------- team stories (Work visibility) ----------
+// Team-only stories also appear at the top of the team's Work feed.
+r.get('/work/stories', h((req, res) => {
+  const t = team(req);
+  const rows = all("SELECT * FROM stories WHERE audience = 'team' AND team_id = ? AND expires_at > ? ORDER BY id", t, nowIso());
+  const byUser = new Map();
+  for (const s of rows) {
+    if (!byUser.has(s.user_id)) byUser.set(s.user_id, { user: publicUser(s.user_id), stories: [] });
+    byUser.get(s.user_id).stories.push(storyOut(s, req.user.id));
+  }
+  res.json([...byUser.values()].map((g) => ({ ...g, allSeen: g.stories.every((s) => s.seen) })));
 }));
 
 // ---------- feed ----------

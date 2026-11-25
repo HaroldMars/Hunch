@@ -576,6 +576,11 @@ if (getSetting('teams_migrated') !== '1') {
     setSetting('teams_migrated', '1');
   });
 }
+// v0.8 redesign: Mood Clouds (note categories), photo effects, Close Friends retired.
+addColumn('notes', 'category', "TEXT NOT NULL DEFAULT 'thought'");
+addColumn('stories', 'effect', 'TEXT');
+run("UPDATE stories SET audience = 'friends' WHERE audience = 'close_friends'");
+
 // Department hierarchy: a manager supervises many teams (Social Media → Team Trustpilot, Team Expedia, …).
 addColumn('teams', 'manager_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
 addColumn('teams', 'department', "TEXT NOT NULL DEFAULT 'Social Media'");
