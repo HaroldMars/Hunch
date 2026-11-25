@@ -160,12 +160,13 @@ export const attachmentUrls = (json) => {
 };
 
 // ---------- user projections ----------
-export const PUBLIC_COLS = 'id, user_code, username, full_name, avatar, cover, role, bio, job_title, department, location, privacy, created_at';
+export const PUBLIC_COLS = 'id, user_code, username, full_name, avatar, cover, role, bio, job_title, location, privacy, created_at';
 export const publicUser = (id) => (id ? get(`SELECT ${PUBLIC_COLS} FROM users WHERE id = ?`, id) : null);
+export const parseList = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 export const selfUser = (u) => {
   if (!u) return null;
   const { password_hash, verify_code, verify_expires, ...rest } = u;
-  return rest;
+  return { ...rest, interests: parseList(rest.interests), work_mode: !!rest.work_mode };
 };
 
 // ---------- friendships ----------

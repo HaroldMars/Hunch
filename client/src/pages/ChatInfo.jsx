@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
 import { useApp, useSocket } from '../store.jsx';
-import { Avatar, Sheet, Spinner, Empty, Lightbox, Confirm, TopBar, clockTime, useLoad } from '../components/ui.jsx';
+import { Avatar, TeamLogo, Sheet, Spinner, Empty, Lightbox, Confirm, TopBar, clockTime, useLoad } from '../components/ui.jsx';
 import { ReportSheet } from './Profile.jsx';
 import { SharedPost } from './ChatRoom.jsx';
 
@@ -108,24 +108,29 @@ export default function ChatInfo() {
   if (!conv) return <div className="page"><Spinner /></div>;
   const group = conv.type === 'group';
   const admin = conv.my_role === 'admin';
+  // Team channels: membership follows the team (managed in Work), so add / remove / leave live there.
+  const team = conv.team || null;
+  const manageMembers = admin && !team;
   const run = async (fn, msg) => { try { await fn(); if (msg) toast(msg, 'success'); reload(); } catch (e) { toast(e.message, 'error'); } };
-  const status = group ? `${conv.members.length} members` : conv.blocked ? 'Blocked' : conv.other?.online ? 'Active now' : conv.other?.job_title || 'Friend';
+  const status = team ? `${team.name} · ${conv.members.length} members` : group ? `${conv.members.length} members` : conv.blocked ? 'Blocked' : conv.other?.online ? 'Active now' : conv.other?.job_title || 'Friend';
 
   return (
     <div className="page flush">
       <TopBar title="" back />
       <div className="chat-profile">
         <div className="avatar-wrap">
-          <Avatar src={conv.avatar} size={96} online={!group && conv.other?.online} />
-          {group && admin && <button className="cp-cam" onClick={() => photoRef.current.click()} aria-label="Change group photo"><Icon name="camera" size={16} /></button>}
+          {team ? <TeamLogo team={team} size={96} /> : <Avatar src={conv.avatar} size={96} online={!group && conv.other?.online} />}
+          {group && admin && !team && <button className="cp-cam" onClick={() => photoRef.current.click()} aria-label="Change group photo"><Icon name="camera" size={16} /></button>}
         </div>
-        <h2>{conv.title}</h2>
+        <h2>{team ? `#${conv.title}` : conv.title}</h2>
         <div className="muted small">{status}{conv.streak >= 2 ? ` · 🔥 ${conv.streak}-day streak` : ''}</div>
         {group && conv.description && <p className="cp-desc">{conv.description}</p>}
         {group && admin && <button className="link-btn small" style={{ marginTop: 6 }} onClick={() => setEdit({ name: conv.name, description: conv.description || '' })}>Change name, description and image</button>}
         <input ref={photoRef} type="file" accept="image/*" hidden onChange={(e) => e.target.files[0] && run(() => api(`/conversations/${cid}/photo`, { method: 'POST', form: toForm({ photo: e.target.files[0] }) }), 'Group photo updated')} />
         <div className="cp-actions">
-          {group ? (
+          {team ? (
+            <button onClick={() => nav('/?tab=work')}><span><Icon name="briefcase" size={22} /></span>Team</button>
+          ) : group ? (
             <button onClick={() => (admin ? setSheet('add') : toast('Only group admins can add members'))}><span><Icon name="userPlus" size={22} /></span>Add</button>
           ) : (
             <button onClick={() => nav(`/u/${conv.other.id}`)}><span><Icon name="user" size={22} /></span>Profile</button>
@@ -142,12 +147,12 @@ export default function ChatInfo() {
 
         {group && (
           <div className="settings-group">
-            <div className="sg-title" style={{ display: 'flex' }}>Members · {conv.members.length}<span style={{ flex: 1 }} />{admin && <button className="link-btn small" onClick={() => setSheet('add')}>+ Add members</button>}</div>
+            <div className="sg-title" style={{ display: 'flex' }}>Members · {conv.members.length}<span style={{ flex: 1 }} />{manageMembers && <button className="link-btn small" onClick={() => setSheet('add')}>+ Add members</button>}</div>
             {conv.members.map((m) => (
               <div key={m.id} className="row-item">
                 <Avatar user={m} size={40} online={m.online} onClick={() => nav(`/u/${m.id}`)} />
-                <div className="meta"><div className="title">{m.full_name}{m.id === user.id ? ' (you)' : ''}</div><div className="sub">{m.member_role === 'admin' ? 'Group admin' : 'Member'}</div></div>
-                {admin && m.id !== user.id && (
+                <div className="meta"><div className="title">{m.full_name}{m.id === user.id ? ' (you)' : ''}</div><div className="sub">{m.member_role === 'admin' ? (team ? 'Team admin' : 'Group admin') : 'Member'}</div></div>
+                {manageMembers && m.id !== user.id && (
                   <button className="icon-btn" aria-label={`Manage ${m.full_name}`} onClick={() => setSheet({ member: m })}><Icon name="more" size={18} /></button>
                 )}
               </div>
@@ -157,10 +162,10 @@ export default function ChatInfo() {
 
         {group && (
           <div className="settings-group">
-            <div className="sg-title">Group settings</div>
+            <div className="sg-title">{team ? 'Channel settings' : 'Group settings'}</div>
             <Row icon="edit" label="Group name" sub={conv.name} onClick={() => (admin ? setEdit({ name: conv.name, description: conv.description || '' }) : toast('Only group admins can change group settings'))} />
             <Row icon="note" label="Group description" sub={conv.description || 'No description'} onClick={() => (admin ? setEdit({ name: conv.name, description: conv.description || '' }) : toast('Only group admins can change group settings'))} />
-            <Row icon="camera" label="Group photo" sub={admin ? 'Change the group photo' : 'Only admins can change this'} onClick={() => admin && photoRef.current.click()} />
+            {!team && <Row icon="camera" label="Group photo" sub={admin ? 'Change the group photo' : 'Only admins can change this'} onClick={() => admin && photoRef.current.click()} />}
           </div>
         )}
 
@@ -179,7 +184,8 @@ export default function ChatInfo() {
             ? <Row icon="userCheck" label={`Unblock ${conv.other.full_name.split(' ')[0]}`} onClick={() => run(() => api(`/users/${conv.other.id}/block`, { method: 'DELETE' }), 'Unblocked')} />
             : <Row icon="userMinus" label={`Block ${conv.other.full_name.split(' ')[0]}`} danger onClick={() => setConfirm('block')} />)}
           <Row icon="shield" label={group ? 'Report group' : `Report ${conv.other.full_name.split(' ')[0]}`} danger onClick={() => setSheet('report')} />
-          {group && <Row icon="logout" label="Leave group" danger onClick={() => setConfirm('leave')} />}
+          {group && !team && <Row icon="logout" label="Leave group" danger onClick={() => setConfirm('leave')} />}
+          {team && <div className="small muted" style={{ padding: '8px 2px' }}>Everyone in {team.name} is in this channel. To leave it, leave the team in Work.</div>}
         </div>
       </div>
 
@@ -189,7 +195,7 @@ export default function ChatInfo() {
             <button onClick={() => { setSheet(null); run(() => api(`/conversations/${cid}/archive`, { method: 'POST' }), conv.archived ? 'Moved back to Chats' : 'Chat archived'); }}><Icon name="inbox" /> {conv.archived ? 'Unarchive chat' : 'Archive chat'}</button>
             <button onClick={() => setSheet('report')}><Icon name="shield" /> Report</button>
             {!group && !conv.blocked && <button className="danger" onClick={() => { setSheet(null); setConfirm('block'); }}><Icon name="userMinus" /> Block</button>}
-            {group && <button className="danger" onClick={() => { setSheet(null); setConfirm('leave'); }}><Icon name="logout" /> Leave group</button>}
+            {group && !team && <button className="danger" onClick={() => { setSheet(null); setConfirm('leave'); }}><Icon name="logout" /> Leave group</button>}
           </div>
         </Sheet>
       )}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
-import { ROLE_LABELS, moodByKey, themeCss } from '@shared/constants.js';
+import { ROLE_LABELS, INTERESTS, TEAM_ROLE_LABELS, isStaffRole, moodByKey, themeCss } from '@shared/constants.js';
 import { api, toForm } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, TopBar, Spinner, Empty, Sheet, Confirm, useLoad } from '../components/ui.jsx';
@@ -141,7 +141,7 @@ export default function Profile() {
       <div className="profile-head">
         <Avatar user={p} size={96} />
         <h2>{p.full_name}</h2>
-        <div className="uid">{p.username ? `@${p.username} · ` : ''}{p.user_code} · {ROLE_LABELS[p.role]}</div>
+        <div className="uid">{p.username ? `@${p.username} · ` : ''}{p.user_code}{isStaffRole(p.role) ? ` · ${ROLE_LABELS[p.role]}` : ''}</div>
         <WorkIdentity p={p} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
           {p.location && <span className="chip"><Icon name="globe" size={13} /> {p.location}</span>}
@@ -206,26 +206,29 @@ export default function Profile() {
   );
 }
 
-/** Job title, team and department, shown under the name (a professional identity on a social profile). */
+/** Job title under the name, plus interests. Teams and department are work data: the API sends them only to their owner. */
 export const departmentLabel = (d) => (!d ? '' : /department$/i.test(d) ? d : `${d} Department`);
 function WorkIdentity({ p }) {
-  const team = p.team_name || (p.managed_teams?.length ? `Manages ${p.managed_teams.length} team${p.managed_teams.length > 1 ? 's' : ''}` : '');
-  if (!p.job_title && !team && !p.department) return null;
+  const interests = p.interests || [];
+  if (!p.job_title && !p.department && !interests.length) return null;
   return (
-    <div className="work-id">
-      {p.job_title && <span className="jt">{p.job_title}</span>}
-      {team && <span className="tm">{p.team_color && <i style={{ background: p.team_color }} />}{team}</span>}
-      {p.department && <span className="dp">{departmentLabel(p.department)}</span>}
-    </div>
+    <>
+      {(p.job_title || p.department) && (
+        <div className="work-id">
+          {p.job_title && <span className="jt">{p.job_title}</span>}
+          {p.department && <span className="dp" title="Only you can see this">{departmentLabel(p.department)}</span>}
+        </div>
+      )}
+      {interests.length > 0 && <div className="interest-row">{interests.map((x) => <span key={x}>{x}</span>)}</div>}
+    </>
   );
 }
 
 function About({ p, mine }) {
   const friends = useLoad(() => api(`/users/${p.id}/friends`), [p.id]);
   const rows = [
-    ['star', 'Job title', p.job_title], ['globe', 'Location', p.location], ['shield', 'Role', ROLE_LABELS[p.role]],
-    ['users', 'Team', p.team_name], ['layers', 'Supervises', p.managed_teams?.map((t) => t.name).join(', ')],
-    ['briefcase', 'Department', departmentLabel(p.department)], ['userCheck', 'Team leader', p.team_leader?.full_name],
+    ['star', 'Job title', p.job_title], ['globe', 'Location', p.location], ['shield', 'Role', isStaffRole(p.role) ? ROLE_LABELS[p.role] : null],
+    ['heart', 'Interests', p.interests?.join(', ')],
     ['user', 'Username', p.username ? `@${p.username}` : null], ['link', 'User ID', p.user_code],
     ['calendar', 'Joined', new Date(p.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })],
     [p.privacy === 'public' ? 'globe' : 'lock', 'Profile', p.privacy === 'public' ? 'Public' : 'Friends only'],
@@ -237,6 +240,13 @@ function About({ p, mine }) {
         <div className="sg-title">Details</div>
         {rows.map(([i, k, v]) => <div key={k} className="about-row"><Icon name={i} size={18} /><span>{k}</span><b>{v}</b></div>)}
       </div>
+      {mine && (p.teams?.length > 0 || p.department) && (
+        <div className="settings-group">
+          <div className="sg-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="lock" size={12} /> Work · only you can see this</div>
+          {p.department && <div className="about-row"><Icon name="briefcase" size={18} /><span>Department</span><b>{departmentLabel(p.department)}</b></div>}
+          {p.teams?.map((t) => <div key={t.id} className="about-row"><Icon name="users" size={18} /><span>{TEAM_ROLE_LABELS[t.my_role]}</span><b>{t.name}</b></div>)}
+        </div>
+      )}
       <div className="settings-group">
         <div className="sg-title">Friends · {friends.data?.length ?? '…'}{!mine && p.mutuals ? ` · ${p.mutuals} mutual` : ''}</div>
         <div className="friend-strip">{(friends.data || []).slice(0, 12).map((f) => <a key={f.id} href={`/u/${f.id}`}><Avatar user={f} size={44} /><span>{f.full_name.split(' ')[0]}</span></a>)}</div>
@@ -266,12 +276,10 @@ export function ReportSheet({ target, id, name, onClose }) {
 export function EditProfile() {
   const { user, setSession, session, toast } = useApp();
   const nav = useNavigate();
-  const [f, setF] = useState({ full_name: user.full_name, username: user.username || '', bio: user.bio || '', job_title: user.job_title || '', department: user.department || '', location: user.location || '', privacy: user.privacy });
+  const [f, setF] = useState({ full_name: user.full_name, username: user.username || '', bio: user.bio || '', job_title: user.job_title || '', department: user.department || '', location: user.location || '', privacy: user.privacy, interests: user.interests || [] });
   const [busy, setBusy] = useState(false);
   const ref = useRef();
   const coverRef = useRef();
-  const me = useLoad(() => api(`/users/${user.id}`), [user.id]); // team & department come from Team Management
-  const work = me.data || {};
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const apply = (u) => setSession({ ...session, user: u });
   const save = async () => {
@@ -288,7 +296,7 @@ export function EditProfile() {
   const uploadCover = async (file) => {
     try { apply(await api('/users/me/cover', { method: 'POST', form: toForm({ cover: file }) })); toast('Cover photo updated', 'success'); } catch (e) { toast(e.message, 'error'); }
   };
-  const teamLabel = work.team_name || (work.managed_teams?.length ? work.managed_teams.map((t) => t.name).join(', ') : '');
+  const toggleInterest = (x) => setF((v) => ({ ...v, interests: v.interests.includes(x) ? v.interests.filter((y) => y !== x) : v.interests.length >= 10 ? v.interests : [...v.interests, x] }));
   return (
     <div className="page">
       <TopBar title="Edit profile" back><button className="btn sm" disabled={busy} onClick={save}>Save</button></TopBar>
@@ -316,14 +324,16 @@ export function EditProfile() {
       <input className="input" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/[^a-zA-Z0-9._]/g, '') })} maxLength={30} placeholder="yourname" autoCapitalize="none" autoCorrect="off" />
       <label className="label">Bio</label>
       <textarea className="input" value={f.bio} onChange={set('bio')} maxLength={300} placeholder="Tell people a little about yourself" />
+      <label className="label">Interests <span className="muted">· up to 10</span></label>
+      <div className="interest-pick">
+        {INTERESTS.map((x) => <button key={x} type="button" className={f.interests.includes(x) ? 'on' : ''} aria-pressed={f.interests.includes(x)} onClick={() => toggleInterest(x)}>{x}</button>)}
+      </div>
       <div className="ep-section">Work information</div>
       <label className="label">Job title</label>
-      <input className="input" value={f.job_title} onChange={set('job_title')} maxLength={80} placeholder="e.g. Customer Service Representative" />
-      <label className="label">{work.managed_teams?.length ? 'Teams you supervise' : 'Team'}</label>
-      <div className="input readonly"><Icon name="users" size={16} /> {me.loading ? '…' : teamLabel || 'Not assigned to a team'}</div>
-      <p className="small muted" style={{ margin: '6px 0 0' }}>Your manager assigns teams in Team Management.</p>
-      <label className="label">Department</label>
-      <input className="input" value={f.department} onChange={set('department')} maxLength={80} placeholder={work.team_department || 'e.g. Social Media'} />
+      <input className="input" value={f.job_title} onChange={set('job_title')} maxLength={80} placeholder="e.g. Designer, Student, Founder" />
+      <label className="label">Department <span className="muted">· only you see this</span></label>
+      <input className="input" value={f.department} onChange={set('department')} maxLength={80} placeholder="e.g. Marketing" />
+      <p className="small muted" style={{ margin: '6px 0 0' }}><Icon name="lock" size={12} /> Your teams are managed in Work and never appear on your public profile.</p>
       <div className="ep-section">More</div>
       <label className="label">Location</label>
       <input className="input" value={f.location} onChange={set('location')} maxLength={80} />

@@ -1,67 +1,65 @@
 import { get, all } from './db.js';
 
-// A team is identified by its team leader's user id.
-// TLs own their team; SMEs and agents belong to their team leader's team.
-// Developers oversee every team. A manager supervises the teams assigned to them (teams.manager_id),
-// e.g. the Social Media manager over Team Trustpilot, Team Expedia and Team VRBO.
-// The `teams` table holds each team's name, colour, assigned SME and status (see Team Management).
-export const OVERSEERS = ['developer', 'manager'];
+// Work Mode teams. Anyone can create a team; a team belongs to its members:
+//   owner  — edit or delete the team, assign admins, remove members
+//   admin  — invite members, manage channels and team settings
+//   member — take part: chat, view and (when allowed) post team content
+// Teams are always private: nothing about them is shown on public profiles.
+export const TEAM_ROLES = ['owner', 'admin', 'member'];
 
-export const teamOf = (u) => (!u ? null : u.role === 'tl' ? u.id : ['sme', 'agent'].includes(u.role) ? u.team_leader_id || null : null);
-export const isOverseer = (u) => OVERSEERS.includes(u?.role);
+export const teamRow = (teamId) => (teamId ? get('SELECT * FROM teams WHERE id = ?', Number(teamId)) : undefined);
+const activeTeam = (teamId) => get("SELECT * FROM teams WHERE id = ? AND status = 'active'", Number(teamId));
+export const teamName = (teamId) => teamRow(teamId)?.name || null;
 
-export const teamLeader = (teamId) => get("SELECT id, full_name, avatar FROM users WHERE id = ? AND role = 'tl'", Number(teamId));
-/** Active teams, as their team leaders (id = TL id) plus the team's name and colour. */
-export const allTeams = () => all(
-  `SELECT u.id, u.full_name, u.avatar, t.id team_row, t.name, t.color, t.manager_id, t.department FROM teams t JOIN users u ON u.id = t.tl_id
-   WHERE t.status = 'active' AND u.role = 'tl' AND u.status = 'active' ORDER BY t.name COLLATE NOCASE`
-);
-export const teamRow = (tlId) => (tlId ? get('SELECT * FROM teams WHERE tl_id = ?', Number(tlId)) : undefined);
-/** Display name for the team led by tlId ("Team Carla" if it has no named team yet). */
-export const teamName = (tlId) => {
-  const t = teamRow(tlId);
-  if (t) return t.name;
-  const tl = teamLeader(tlId);
-  return tl ? `Team ${tl.full_name.split(' ')[0]}` : null;
+/** This user's role in the team ('owner' | 'admin' | 'member'), or null. */
+export const memberRole = (u, teamId) => {
+  const id = typeof u === 'object' ? u?.id : u;
+  if (!id || !teamId) return null;
+  return get(
+    "SELECT m.role FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.team_id = ? AND m.user_id = ? AND t.status = 'active'",
+    Number(teamId), id
+  )?.role || null;
 };
 
-/** Does this manager supervise the team led by tlId? */
-export const supervises = (u, tlId) => u?.role === 'manager' && !!get("SELECT 1 x FROM teams WHERE tl_id = ? AND manager_id = ? AND status = 'active'", Number(tlId), u.id);
+/** Active teams this user belongs to, with their role in each. */
+export const workTeams = (u) => (!u ? [] : all(
+  `SELECT t.*, m.role my_role FROM team_members m JOIN teams t ON t.id = m.team_id
+   WHERE m.user_id = ? AND t.status = 'active' ORDER BY t.name COLLATE NOCASE`, typeof u === 'object' ? u.id : u
+));
 
-/** The teams this user works in: all (developer), supervised (manager) or their own (TL, SME, agent). */
-export function workTeams(u) {
-  if (!u) return [];
-  if (u.role === 'developer') return allTeams();
-  if (u.role === 'manager') return allTeams().filter((t) => t.manager_id === u.id);
-  const own = teamOf(u);
-  return own ? allTeams().filter((t) => t.id === own) : [];
-}
-
-export const canAccessTeam = (u, teamId) => !!teamId && !!teamLeader(teamId)
-  && (u.role === 'developer' || supervises(u, teamId) || teamOf(u) === Number(teamId));
-export const canManageTeam = (u, teamId) => !!teamId
-  && (u.role === 'developer' || supervises(u, teamId) || (u.role === 'tl' && u.id === Number(teamId)));
+export const canAccessTeam = (u, teamId) => !!memberRole(u, teamId);
+/** Owners and admins run the team day to day (posts, schedules, invites, channels, settings). */
+export const canManageTeam = (u, teamId) => ['owner', 'admin'].includes(memberRole(u, teamId));
+export const isTeamOwner = (u, teamId) => memberRole(u, teamId) === 'owner';
+export const canInvite = (u, teamId) => {
+  const role = memberRole(u, teamId);
+  return role === 'owner' || role === 'admin' || (role === 'member' && !!activeTeam(teamId)?.members_can_invite);
+};
 
 export const teamSettings = (teamId) => get('SELECT * FROM team_settings WHERE team_id = ?', teamId) || { team_id: teamId, members_can_post: 0 };
 
-export const postPermission = (teamId, userId) => get('SELECT * FROM post_permissions WHERE team_id = ? AND user_id = ?', teamId, userId);
-
-/** TL-only posting by default; SMEs post too. Members post only when the TL enables it and approved their request. */
+/** Owners and admins always post in the Work feed; members post when the team setting allows it. */
 export function canPostInTeam(u, teamId) {
   if (!canAccessTeam(u, teamId)) return false;
-  if (canManageTeam(u, teamId) || u.role === 'sme') return true;
-  return !!teamSettings(teamId).members_can_post && postPermission(teamId, u.id)?.status === 'approved';
+  return canManageTeam(u, teamId) || !!teamSettings(teamId).members_can_post;
 }
 
 export const teamMemberIds = (teamId) =>
-  all("SELECT id FROM users WHERE status = 'active' AND (id = ? OR team_leader_id = ?)", teamId, teamId).map((r) => r.id);
+  all("SELECT m.user_id id FROM team_members m JOIN users u ON u.id = m.user_id WHERE m.team_id = ? AND u.status = 'active'", Number(teamId)).map((r) => r.id);
 
-/** Resolve the team a request is about: overseers pick with ?team=, everyone else gets their own. */
+/** Everyone who shares at least one team with this user (including the user). */
+export const teammateIds = (u) => {
+  const id = typeof u === 'object' ? u?.id : u;
+  return all(
+    `SELECT DISTINCT o.user_id id FROM team_members me JOIN team_members o ON o.team_id = me.team_id
+     JOIN teams t ON t.id = me.team_id WHERE me.user_id = ? AND t.status = 'active'`, id
+  ).map((r) => r.id);
+};
+
+/** The team a request is about: the requested one if the user is in it, otherwise their first team. */
 export function resolveTeam(u, requested) {
   const mine = workTeams(u);
-  if (isOverseer(u)) {
-    const t = Number(requested) || mine[0]?.id || null;
-    return t && mine.some((x) => x.id === t) ? t : null;
-  }
+  const want = Number(requested);
+  if (want) return mine.some((t) => t.id === want) ? want : null;
   return mine[0]?.id || null;
 }

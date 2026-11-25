@@ -4,7 +4,7 @@ import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
 import { useApp, useSocket } from '../store.jsx';
 import { moodByKey, themeCss } from '@shared/constants.js';
-import { Avatar, Sheet, Spinner, Empty, Lightbox, clockTime, useLoad, FilePreviews } from '../components/ui.jsx';
+import { Avatar, TeamLogo, Sheet, Spinner, Empty, Lightbox, clockTime, useLoad, FilePreviews } from '../components/ui.jsx';
 import { Streak } from './Chats.jsx';
 
 const EMOJIS = '😀 😂 🥹 😊 😍 🥰 😘 😎 🤩 🥳 😇 🙂 😉 😌 😴 🤔 🧐 😮 😢 😭 😤 😠 🤯 😱 🙄 😬 🤗 🤭 👍 👎 👏 🙌 🙏 💪 👋 🤝 ❤️ 🧡 💛 💚 💙 💜 🖤 💯 🔥 ✨ 🎉 🎂 ☕ 🍕 🌞 🌙 ⭐ 🌈 ✅ ❌ 👀 💬'.split(' ');
@@ -196,15 +196,15 @@ export default function ChatRoom() {
   const myLast = [...messages].reverse().find((m) => m.sender_id === user.id && m.kind === 'text');
   const seenBy = myLast ? others.filter((o) => o.last_read_id >= myLast.id) : [];
   const sub = typingNames.length ? `${typingNames[0].split(' ')[0]} is typing…`
-    : conv.type === 'group' ? `${conv.members.length} members` : conv.other?.online ? 'Active now' : conv.other?.job_title || '';
+    : conv.team ? `${conv.team.name} · ${conv.members.length} members` : conv.type === 'group' ? `${conv.members.length} members` : conv.other?.online ? 'Active now' : conv.other?.job_title || '';
 
   return (
     <div className="chat-room">
       <div className="chat-head">
         <button className="icon-btn" onClick={() => nav('/chats')} aria-label="Back"><Icon name="back" /></button>
-        <Avatar src={conv.avatar} size={38} online={conv.type === 'direct' && conv.other?.online} onClick={() => conv.type === 'direct' && nav(`/u/${conv.other.id}`)} />
+        {conv.team ? <TeamLogo team={conv.team} size={38} /> : <Avatar src={conv.avatar} size={38} online={conv.type === 'direct' && conv.other?.online} onClick={() => conv.type === 'direct' && nav(`/u/${conv.other.id}`)} />}
         <div className="meta" onClick={() => nav(`/chats/${cid}/info`)} style={{ cursor: 'pointer' }}>
-          <div className="title">{conv.title} <Streak n={conv.streak} /></div>
+          <div className="title">{conv.team ? `#${conv.title}` : conv.title} <Streak n={conv.streak} /></div>
           <div className="sub" style={typingNames.length ? { color: 'var(--primary)' } : undefined}>{sub}</div>
         </div>
         <button className="icon-btn" onClick={() => nav(`/chats/${cid}/info`)} aria-label="Chat info"><Icon name="more" /></button>

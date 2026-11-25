@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Logo from '../Logo.jsx';
 import Icon from '../Icon.jsx';
+import { INTERESTS } from '../constants.js';
 import './auth.css';
 
 const QUOTES = [
@@ -138,15 +139,17 @@ const GoogleG = () => (
 );
 
 /**
- * Sign-in card. `appKind` is this app ('client' | 'admin'). Everyone stays in the app they
- * signed in to — every role has a Hunch app account. The only hand-over is an agent signing
- * in on the dashboard, which they have no access to, so they're sent to the Hunch app.
+ * Sign-in card. `appKind` is this app ('client' | 'admin'). Everyone stays in the app they signed in to.
+ * The Admin Dashboard is staff-only: anyone else signing in there is sent to the Hunch app.
+ * `allowSignup` (Hunch app) adds Create Account: email + password, or Continue with Google.
  */
-export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: settingsIn }) {
+export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: settingsIn, allowSignup = false, initialMode = 'login' }) {
   const settings = settingsIn || {}; // never crash if the server couldn't be reached
-  const [mode, setMode] = useState('login');
+  const [mode, setMode] = useState(allowSignup ? initialMode : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
   const [remember, setRemember] = useState(true);
   const [errors, setErrors] = useState({});
   const [alert, setAlert] = useState(null);
@@ -163,7 +166,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
 
   // Real Google Identity Services button when the server has a client id configured.
   useEffect(() => {
-    if (!settings.google_client_id || mode !== 'login') return;
+    if (!settings.google_client_id || mode === 'forgot') return;
     const init = () => {
       window.google.accounts.id.initialize({
         client_id: settings.google_client_id,
@@ -172,7 +175,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
           try { finish(await api('/auth/google', { method: 'POST', body: { credential, remember, app: appKind } }), remember); } catch (e) { setAlert({ type: 'error', text: e.message }); doShake(); } finally { setBusy(false); }
         },
       });
-      if (googleRef.current) window.google.accounts.id.renderButton(googleRef.current, { theme: 'outline', size: 'large', width: 356, text: 'continue_with', shape: 'pill' });
+      if (googleRef.current) window.google.accounts.id.renderButton(googleRef.current, { theme: 'outline', size: 'large', width: 356, text: mode === 'signup' ? 'signup_with' : 'continue_with', shape: 'pill' });
     };
     if (window.google?.accounts) return init();
     const s = document.createElement('script');
@@ -187,6 +190,12 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     if (!email.trim()) e.email = 'Enter your email address.';
     else if (email.includes('@') && !/^\S+@\S+\.\S+$/.test(email.trim())) e.email = 'That email address doesn’t look right.';
     if (mode === 'login' && !password) e.password = 'Enter your password.';
+    if (mode === 'signup') {
+      if (!fullName.trim()) e.fullName = 'Enter your name.';
+      if (!/^\S+@\S+\.\S+$/.test(email.trim())) e.email = 'Enter a valid email address.';
+      if (!/^[a-z0-9._]{3,30}$/i.test(username.trim().replace(/^@/, ''))) e.username = '3–30 letters, numbers, dots or underscores.';
+      if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) e.password = 'Use 8+ characters with letters and numbers.';
+    }
     setErrors(e);
     if (Object.keys(e).length) doShake();
     return !Object.keys(e).length;
@@ -201,6 +210,8 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
       if (mode === 'forgot') {
         const r = await api('/auth/forgot', { method: 'POST', body: { identifier: email.trim() } });
         setAlert({ type: 'success', text: r.message });
+      } else if (mode === 'signup') {
+        finish(await api('/auth/signup', { method: 'POST', body: { full_name: fullName.trim(), email: email.trim(), username: username.trim().replace(/^@/, ''), password, remember } }), remember);
       } else {
         finish(await api('/auth/login', { method: 'POST', body: { identifier: email.trim(), password, remember, app: appKind } }), remember);
       }
@@ -210,6 +221,8 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
       doShake();
     } finally { setBusy(false); }
   };
+
+  const switchMode = (m) => { setMode(m); setAlert(null); setErrors({}); };
 
   if (redirecting) {
     return (
@@ -223,11 +236,18 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     <AuthShell api={api}>
       <form className={`hx-card ${shake ? 'shake' : ''}`} onSubmit={submit} noValidate>
         
-        <h2>{mode === 'login' ? 'Welcome Back' : 'Reset password'}</h2>
-        <p className="sub">{mode === 'login' ? 'Sign in to continue your journey.' : 'Enter your account email. An administrator will be notified to issue you a temporary password.'}</p>
+        <h2>{mode === 'login' ? 'Welcome Back' : mode === 'signup' ? 'Create Account' : 'Reset password'}</h2>
+        <p className="sub">{mode === 'login' ? 'Sign in to continue your journey.' : mode === 'signup' ? 'Join Hunch: share moods, stories and moments with friends.' : 'Enter your account email. An administrator will be notified to issue you a temporary password.'}</p>
         {settings.maintenance_banner && mode === 'login' && <div className="hx-alert info"><Icon name="megaphone" size={17} /> {settings.maintenance_banner}</div>}
         {alert && <div className={`hx-alert ${alert.type}`} role="alert"><Icon name={alert.type === 'error' ? 'close' : 'check'} size={17} /> {alert.text}</div>}
-        <Field label="Email Address" type="email" value={email} onChange={(v) => { setEmail(v); setErrors({ ...errors, email: null }); }} error={errors.email} autoComplete="username" autoFocus />
+        {mode === 'signup' && <Field label="Full Name" value={fullName} onChange={(v) => { setFullName(v); setErrors({ ...errors, fullName: null }); }} error={errors.fullName} autoComplete="name" autoFocus maxLength={80} />}
+        <Field label="Email Address" type="email" value={email} onChange={(v) => { setEmail(v); setErrors({ ...errors, email: null }); }} error={errors.email} autoComplete={mode === 'signup' ? 'email' : 'username'} autoFocus={mode !== 'signup'} />
+        {mode === 'signup' && (
+          <>
+            <Field label="Username" value={username} onChange={(v) => { setUsername(v.replace(/\s/g, '')); setErrors({ ...errors, username: null }); }} error={errors.username} autoComplete="username" maxLength={31} />
+            <Field label="Password" value={password} toggle onChange={(v) => { setPassword(v); setErrors({ ...errors, password: null }); }} error={errors.password} autoComplete="new-password" />
+          </>
+        )}
         {mode === 'login' && (
           <>
             <Field label="Password" value={password} toggle onChange={(v) => { setPassword(v); setErrors({ ...errors, password: null }); }} error={errors.password?.trim()} autoComplete="current-password" />
@@ -237,14 +257,16 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
           </>
         )}
         <button className="hx-btn" disabled={busy}>
-          {busy ? <><span className="hx-spin" /> {mode === 'login' ? 'Signing In...' : 'Sending...'}</> : mode === 'login' ? 'Sign In' : 'Send reset request'}
+          {busy ? <><span className="hx-spin" /> {mode === 'login' ? 'Signing In...' : mode === 'signup' ? 'Creating account...' : 'Sending...'}</> : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send reset request'}
         </button>
-        <div style={{ textAlign: 'center', marginTop: 16 }}>
-          <button type="button" className="hx-link" onClick={() => { setMode(mode === 'login' ? 'forgot' : 'login'); setAlert(null); setErrors({}); }}>
-            {mode === 'login' ? 'Forgot Password?' : 'Back to sign in'}
-          </button>
-        </div>
-        {mode === 'login' && (
+        {mode !== 'signup' && (
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <button type="button" className="hx-link" onClick={() => switchMode(mode === 'login' ? 'forgot' : 'login')}>
+              {mode === 'login' ? 'Forgot Password?' : 'Back to sign in'}
+            </button>
+          </div>
+        )}
+        {mode !== 'forgot' && (allowSignup || mode === 'login') && (
           <>
             <div className="hx-or">OR</div>
             {settings.google_client_id ? <div ref={googleRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} /> : (
@@ -255,8 +277,9 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
           </>
         )}
         <p className="hx-foot">
-          Don’t have an account?<br />Contact your administrator.
-          {settings.allow_account_requests && settings.requestAccountHref && <><br /><a href={settings.requestAccountHref} style={{ fontWeight: 700 }}>Request access</a></>}
+          {!allowSignup ? <>Hunch staff only.<br />Staff accounts are created by a system administrator.</>
+            : mode === 'signup' ? <>Already have an account? <button type="button" className="hx-link" style={{ fontWeight: 700 }} onClick={() => switchMode('login')}>Sign in</button></>
+              : <>Don’t have an account? <button type="button" className="hx-link" style={{ fontWeight: 700 }} onClick={() => switchMode('signup')}>Create account</button></>}
         </p>
       </form>
     </AuthShell>
@@ -277,7 +300,9 @@ function strength(p) {
 /** First-login flow: verify email → create a new password → complete profile. */
 export function Onboarding({ api, session, setSession, logout }) {
   const step = session.next;
-  const idx = STEPS.findIndex(([k]) => k === step);
+  // Only the steps this account goes through (email sign-ups skip the temporary password; Google sign-ups only fill in their profile).
+  const steps = STEPS.filter(([k]) => !session.steps || session.steps.includes(k));
+  const idx = steps.findIndex(([k]) => k === step);
   const [shake, doShake] = useShake();
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -292,8 +317,8 @@ export function Onboarding({ api, session, setSession, logout }) {
     <AuthShell api={api}>
       <div className={`hx-card ${shake ? 'shake' : ''}`}>
         
-        <div className="hx-steps" aria-label={`Step ${idx + 1} of 3`}>
-          {STEPS.map(([k, l], i) => <div key={k} className={i < idx ? 'done' : i === idx ? 'on' : ''}><i><b /></i><span>{i + 1}. {l}</span></div>)}
+        <div className="hx-steps" aria-label={`Step ${idx + 1} of ${steps.length}`}>
+          {steps.map(([k, l], i) => <div key={k} className={i < idx ? 'done' : i === idx ? 'on' : ''}><i><b /></i><span>{i + 1}. {l}</span></div>)}
         </div>
         {err && <div className="hx-alert error" role="alert"><Icon name="close" size={17} /> {err}</div>}
         {step === 'verify' && <VerifyStep api={api} user={user} busy={busy} run={run} />}
@@ -348,9 +373,11 @@ function PasswordStep({ api, busy, run, onInvalid }) {
 }
 
 function ProfileStep({ api, user, busy, run }) {
-  const [f, setF] = useState({ full_name: user.full_name || '', job_title: user.job_title || '', location: user.location || '', bio: user.bio || '' });
+  const [f, setF] = useState({ full_name: user.full_name || '', username: user.username || '', bio: user.bio || '' });
+  const [interests, setInterests] = useState(Array.isArray(user.interests) ? user.interests : []);
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(user.avatar || '');
+  const [check, setCheck] = useState(null); // live username availability
   const ref = useRef();
   useEffect(() => {
     if (!file) return undefined;
@@ -358,21 +385,30 @@ function ProfileStep({ api, user, busy, run }) {
     setPreview(u);
     return () => URL.revokeObjectURL(u);
   }, [file]);
+  useEffect(() => {
+    const name = f.username.trim();
+    if (!name || name === user.username) return setCheck(null);
+    const t = setTimeout(() => api(`/auth/username-available?u=${encodeURIComponent(name)}`).then(setCheck).catch(() => setCheck(null)), 350);
+    return () => clearTimeout(t);
+  }, [f.username]);
   const set = (k) => (v) => setF({ ...f, [k]: v });
+  const toggle = (x) => setInterests((l) => (l.includes(x) ? l.filter((y) => y !== x) : l.length >= 10 ? l : [...l, x]));
   const submit = (e) => {
     e.preventDefault();
     const form = new FormData();
-    Object.entries(f).forEach(([k, v]) => form.append(k, v));
+    Object.entries(f).forEach(([k, v]) => form.append(k, k === 'username' ? v.trim().replace(/^@/, '') : v));
+    form.append('interests', JSON.stringify(interests));
     if (file) form.append('avatar', file);
     run(() => api('/auth/complete-profile', { method: 'POST', form }));
   };
   const initials = (f.full_name || '?').split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+  const usernameError = check && !check.ok ? (check.reason === 'Taken' ? 'That username is taken.' : check.reason) : null;
   return (
     <form onSubmit={submit}>
       <h2>Complete your profile</h2>
-      <p className="sub">Help your teammates recognise you. You can change this anytime.</p>
+      <p className="sub">Pick a username and tell people a little about you. You can change this anytime.</p>
       <div className="hx-avatar-pick">
-        <div className="av">{preview ? <img src={preview} alt="" /> : initials}</div>
+        <div className="av">{preview ? <img src={preview} alt="" referrerPolicy="no-referrer" /> : initials}</div>
         <div>
           <button type="button" className="hx-btn ghost" style={{ height: 40, width: 'auto', padding: '0 16px', fontSize: 14 }} onClick={() => ref.current.click()}><Icon name="camera" size={17} /> {preview ? 'Change photo' : 'Add photo'}</button>
           <div className="hx-hint ok" style={{ paddingTop: 6 }}>Optional · JPG or PNG</div>
@@ -380,12 +416,15 @@ function ProfileStep({ api, user, busy, run }) {
         <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => setFile(e.target.files[0] || null)} />
       </div>
       <Field label="Full name" value={f.full_name} onChange={set('full_name')} autoComplete="name" error={!f.full_name.trim() ? 'Your name is required.' : null} />
-      <div className="hx-grid2">
-        <Field label="Job title" value={f.job_title} onChange={set('job_title')} maxLength={80} />
-        <Field label="Location" value={f.location} onChange={set('location')} maxLength={80} />
+      <Field label="Username" value={f.username} onChange={(v) => set('username')(v.replace(/\s/g, ''))} autoComplete="username" maxLength={31} error={usernameError} />
+      <Field label="Bio (optional)" value={f.bio} onChange={set('bio')} textarea maxLength={300} />
+      <div className="hx-interests" role="group" aria-label="Interests">
+        <div className="hx-label">Interests <small>{interests.length ? `${interests.length} selected` : 'pick a few'}</small></div>
+        <div className="hx-chips">
+          {INTERESTS.map((x) => <button key={x} type="button" className={interests.includes(x) ? 'on' : ''} aria-pressed={interests.includes(x)} onClick={() => toggle(x)}>{x}</button>)}
+        </div>
       </div>
-      <Field label="Short bio (optional)" value={f.bio} onChange={set('bio')} textarea maxLength={300} />
-      <button className="hx-btn" disabled={busy || !f.full_name.trim()}>{busy ? <><span className="hx-spin" /> Saving...</> : 'Finish & enter Hunch'}</button>
+      <button className="hx-btn" disabled={busy || !f.full_name.trim() || !f.username.trim() || !!usernameError}>{busy ? <><span className="hx-spin" /> Saving...</> : 'Finish & enter Hunch'}</button>
     </form>
   );
 }

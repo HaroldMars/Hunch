@@ -38,7 +38,7 @@ export default function Notifications() {
     if (n.entity_type === 'highlight') nav(`/me?highlight=${n.entity_id}`);
     else if (['like', 'comment', 'reply', 'repost', 'mention', 'comment_reaction', 'work_post', 'work_announcement'].includes(n.type)) nav(`/post/${n.entity_id}`);
     else if (n.type === 'schedule') nav('/?tab=work&view=schedule');
-    else if (n.type === 'post_permission') nav('/?tab=work');
+    else if (['post_permission', 'team_invite', 'team_join', 'team'].includes(n.type)) nav('/?tab=work');
     else if (n.type === 'trip') nav(`/map?trip=${n.entity_id}`);
     else if (n.type === 'friend_request') nav('/connect');
     else if (n.type === 'friend_accept') nav(`/u/${n.actor_id}`);

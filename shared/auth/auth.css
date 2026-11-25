@@ -205,3 +205,13 @@
 @media (hover: none) and (pointer: coarse) {
   input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
 }
+
+/* Interests (Complete your profile) */
+.hx-interests { margin: 4px 0 18px; }
+.hx-label { font-size: 14px; font-weight: 700; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
+.hx-label small { font-weight: 500; color: var(--hx-muted); font-size: 12.5px; }
+.hx-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.hx-chips button { height: 34px; padding: 0 14px; border-radius: 17px; border: 1.5px solid rgba(255, 255, 255, 0.2); background: transparent; color: var(--hx-text); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s; }
+.hx-chips button:hover { border-color: var(--hx-primary); }
+.hx-chips button.on { background: var(--hx-primary); border-color: var(--hx-primary); color: #fff; }
+.hx-chips button:focus-visible { outline: 2px solid var(--hx-primary); outline-offset: 2px; }

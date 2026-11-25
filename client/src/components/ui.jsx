@@ -192,3 +192,11 @@ export function useLoad(fn, deps) {
   useEffect(() => { reload(); }, deps);
   return { ...state, reload, setData: (d) => setState((s) => ({ ...s, data: typeof d === 'function' ? d(s.data) : d })) };
 }
+
+/** A team's logo, or its initials on a tinted tile. */
+export function TeamLogo({ team, size = 44 }) {
+  const initials = (team?.name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  return team?.logo
+    ? <img className="team-logo" src={team.logo} alt="" style={{ width: size, height: size }} />
+    : <span className="team-logo ph" style={{ width: size, height: size, fontSize: size * 0.36 }} aria-hidden="true">{initials}</span>;
+}

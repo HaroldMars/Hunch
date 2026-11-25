@@ -127,7 +127,7 @@ function Templates() {
       setEdit(null); reload();
     } catch (e) { toast(e.message, 'error'); }
   };
-  const canEdit = (t) => t.created_by === user.id || ['developer', 'manager'].includes(user.role);
+  const canEdit = (t) => t.created_by === user.id || ['developer', 'sysadmin'].includes(user.role);
   return (
     <div className="mail-view" style={{ gridColumn: 'span 2' }}>
       <div className="card-head"><h3>Email templates</h3><button className="btn sm" onClick={() => setEdit({ name: '', subject: '', body: '' })}><Icon name="plus" size={14} /> New template</button></div>

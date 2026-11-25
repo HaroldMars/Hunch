@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
-import { ROLE_LABELS } from '@shared/constants.js';
 import { api } from '../api.js';
 import { Avatar, TopBar, Spinner, Empty } from '../components/ui.jsx';
 import { FriendButton } from './Connect.jsx';
@@ -33,7 +32,7 @@ export default function Search() {
             <Avatar user={u} size={48} onClick={() => nav(`/u/${u.id}`)} />
             <div className="meta" onClick={() => nav(`/u/${u.id}`)} style={{ cursor: 'pointer' }}>
               <div className="title">{u.full_name}{u.exact && <span className="chip" style={{ padding: '1px 7px', fontSize: 10.5, color: 'var(--primary)' }}>Exact match</span>}</div>
-              <div className="sub">{u.user_code} · {u.job_title || ROLE_LABELS[u.role]}{u.location ? ` · ${u.location}` : ''}</div>
+              <div className="sub">{u.username ? `@${u.username}` : u.user_code}{u.job_title ? ` · ${u.job_title}` : ''}{u.location ? ` · ${u.location}` : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               {u.relation === 'self' ? <span className="chip">You</span> : <FriendButton user={u} relation={u.relation} onChange={(r) => update(u.id, r)} compact />}

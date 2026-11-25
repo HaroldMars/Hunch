@@ -5,6 +5,7 @@ import nodemailer from 'nodemailer';
 import path from 'node:path';
 import { UPLOAD_DIR } from './db.js';
 import { CLIENT_URL, ADMIN_URL, REAL_SERVICES } from './config.js';
+import { isStaffRole } from '../../shared/constants.js';
 
 const cfg = {
   host: process.env.EMAIL_HOST || '',
@@ -62,7 +63,7 @@ export const sendVerificationCode = (to, name, code) => sendMail({
   html: layout('Verify your email', [`Hi ${name},`, `Your verification code is:`, code, 'It expires in 15 minutes.']),
 });
 export const sendWelcome = (to, name, login, tempPassword, role) => {
-  const url = role === 'agent' ? CLIENT_URL : ADMIN_URL;
+  const url = isStaffRole(role) ? ADMIN_URL : CLIENT_URL;
   return sendMail({
     to, subject: 'Your Hunch account is ready',
     text: `Hi ${name},\n\nAn account was created for you on Hunch.\nSign in: ${url}\nUsername or email: ${login}\nTemporary password: ${tempPassword}\n\nYou'll be asked to verify your email and choose a new password the first time you sign in.`,
@@ -70,13 +71,18 @@ export const sendWelcome = (to, name, login, tempPassword, role) => {
   });
 };
 export const sendPasswordReset = (to, name, tempPassword, role) => {
-  const url = role === 'agent' ? CLIENT_URL : ADMIN_URL;
+  const url = isStaffRole(role) ? ADMIN_URL : CLIENT_URL;
   return sendMail({
     to, subject: 'Your Hunch password was reset',
     text: `Hi ${name},\n\nYour Hunch password was reset by an administrator.\nTemporary password: ${tempPassword}\nSign in at ${url} and choose a new password.`,
     html: layout('Your password was reset', [`Hi ${name},`, 'An administrator reset your password.', `Temporary password: ${tempPassword}`, 'Sign in and choose a new password right away.'], { url, label: 'Sign in' }),
   });
 };
+export const sendTeamInvite = (to, inviter, teamName) => sendMail({
+  to, subject: `${inviter} invited you to ${teamName} on Hunch`,
+  text: `${inviter} invited you to join the team "${teamName}" on Hunch.\nCreate your free account with this email address at ${CLIENT_URL} and you'll find the invitation in Work.`,
+  html: layout(`Join ${teamName} on Hunch`, [`${inviter} invited you to join the team “${teamName}”.`, 'Create your free Hunch account with this email address, turn on Work Mode in Settings, and accept the invitation in Work.'], { url: CLIENT_URL, label: 'Join Hunch' }),
+});
 export const sendComposed = (to, fromName, subject, body, attachments) => sendMail({
   to, subject: subject || '(no subject)',
   text: `${body}\n\n${fromName} via Hunch`,

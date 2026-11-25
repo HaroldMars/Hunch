@@ -1476,3 +1476,70 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .cn-moods button span { font-size: 24px; } .cn-moods button small { font-size: 11px; font-weight: 600; }
 .cn-moods button.on { background: color-mix(in srgb, var(--primary) 24%, var(--surface-2)); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--primary); }
 .cn-foot { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); color: var(--text-3); font-size: 13px; font-weight: 600; border-top: 1px solid var(--line); }
+
+/* ================= Work Mode (Settings) ================= */
+.wm-hero { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 18px; background: var(--surface-2); margin-top: 6px; border: 1.5px solid transparent; transition: border-color .2s, background .2s; }
+.wm-hero.on { border-color: color-mix(in srgb, var(--primary) 55%, transparent); background: color-mix(in srgb, var(--primary) 9%, var(--surface-2)); }
+.wm-icon { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: var(--surface-3); color: var(--text-2); flex-shrink: 0; }
+.wm-hero.on .wm-icon { background: var(--primary); color: #fff; }
+.wm-text { flex: 1; min-width: 0; }
+.wm-text b { display: block; font-size: 17px; }
+.wm-text small { display: block; color: var(--text-3); font-size: 13px; margin-top: 3px; line-height: 1.4; }
+.wm-list > div { display: flex; gap: 12px; padding: 11px 2px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+.wm-list > div:last-child { border-bottom: 0; }
+.wm-list svg { flex-shrink: 0; margin-top: 2px; color: var(--text-2); }
+.wm-list b { display: block; font-size: 14.5px; }
+.wm-list small { display: block; color: var(--text-3); font-size: 12.5px; line-height: 1.45; margin-top: 2px; }
+
+/* ================= Work Mode teams ================= */
+.team-logo { border-radius: 14px; object-fit: cover; flex-shrink: 0; display: inline-block; background: var(--surface-3); }
+.team-logo.ph { display: inline-grid; place-items: center; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 55%, #8b3dff)); letter-spacing: .02em; }
+.team-switch button { display: inline-flex; align-items: center; gap: 6px; }
+.team-switch .team-logo { border-radius: 6px; }
+.ts-badge { min-width: 18px; height: 18px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; font-style: normal; display: inline-grid; place-items: center; padding: 0 5px; }
+.work-head .wk-desc { color: var(--text-2); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.work-empty { padding: 28px 22px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; }
+.we-art { width: 76px; height: 76px; border-radius: 24px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 50%, #8b3dff)); box-shadow: 0 10px 30px color-mix(in srgb, var(--primary) 35%, transparent); }
+.work-empty h3 { margin: 18px 0 6px; font-size: 21px; }
+.work-empty > p { margin: 0 0 18px; color: var(--text-2); line-height: 1.5; max-width: 340px; }
+.we-invites { width: 100%; max-width: 360px; display: flex; align-items: center; gap: 12px; text-align: left; padding: 12px 14px; margin-bottom: 14px; border-radius: 16px; border: 1.5px solid color-mix(in srgb, var(--primary) 50%, transparent); background: color-mix(in srgb, var(--primary) 10%, var(--surface-2)); color: var(--text); }
+.we-invites span { flex: 1; }
+.we-invites b { display: block; font-size: 15px; }
+.we-invites small { color: var(--text-3); font-size: 12.5px; }
+.we-actions { width: 100%; max-width: 360px; display: grid; gap: 10px; margin-bottom: 14px; }
+.logo-pick { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+.wk-note { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); margin-bottom: 4px; }
+.wk-note svg { color: var(--primary); flex-shrink: 0; margin-top: 2px; }
+.wk-note b { display: block; font-size: 14px; }
+.wk-note small { display: block; color: var(--text-3); font-size: 12.5px; line-height: 1.4; }
+.code-input { text-align: center; font-size: 22px; font-weight: 800; letter-spacing: .25em; text-transform: uppercase; }
+.code-box { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--line); background: var(--surface-2); }
+.code-box span { flex: 1; min-width: 0; }
+.code-box small { display: block; color: var(--text-3); font-size: 12px; }
+.code-box b { font-size: 18px; letter-spacing: .18em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.invite-results { margin-top: 10px; display: grid; gap: 4px; font-size: 13px; }
+.invite-results .ok { color: var(--success, #1f9d63); }
+.invite-results .no { color: var(--text-3); }
+.invite-card { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.invite-card:last-child { border-bottom: 0; }
+.invite-card .meta { flex: 1; min-width: 0; }
+.invite-card b { display: block; font-size: 15.5px; }
+.invite-card small { display: block; color: var(--text-3); font-size: 12.5px; margin-top: 2px; }
+.invite-card small.desc { color: var(--text-2); }
+.ic-actions { display: flex; gap: 8px; margin-top: 10px; }
+.ic-actions .btn { flex: 1; }
+.role-tag { display: inline-block; font-size: 11px; font-weight: 800; padding: 1px 7px; border-radius: 8px; background: var(--surface-3); color: var(--text-2); }
+.role-tag.owner { background: color-mix(in srgb, #f5a524 22%, transparent); color: #c27c00; }
+.role-tag.admin { background: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary); }
+.mail-dot { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); color: var(--text-2); flex-shrink: 0; }
+.chan-hash { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-3); color: var(--text-2); font-weight: 800; font-size: 18px; flex-shrink: 0; }
+.row-item.click { cursor: pointer; }
+.chat-scope { justify-content: center; gap: 40px; margin-top: 2px; }
+.chat-team { font-size: 11.5px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.row-item .title .hash { color: var(--text-3); font-weight: 800; }
+/* Interests */
+.interest-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+.interest-row span { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 12px; background: color-mix(in srgb, var(--primary) 14%, var(--surface-2)); color: var(--text-2); }
+.interest-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.interest-pick button { height: 34px; padding: 0 14px; border-radius: 17px; border: 1.5px solid var(--line); background: var(--surface-2); color: var(--text); font-weight: 600; font-size: 13.5px; }
+.interest-pick button.on { background: var(--primary); border-color: var(--primary); color: #fff; }

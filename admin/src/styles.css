@@ -326,3 +326,6 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 
 /* Team detail: five info cards (team, manager, TL, SME, members). */
 .grid.tm-infos { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+/* Teams (Work Mode) */
+.team-logo-sm { width: 34px; height: 34px; border-radius: 10px; object-fit: cover; flex-shrink: 0; }
+.team-logo-sm.ph { display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #fff; background: linear-gradient(135deg, #5b8def, #8b3dff); }

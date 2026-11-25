@@ -592,6 +592,119 @@ if (getSetting('team_managers_migrated') !== '1') {
   setSetting('team_managers_migrated', '1');
 }
 
+// ---------- v0.9: platform refactor ----------
+// Staff-only Admin Dashboard, self sign-up (email or Google) and Work Mode: anyone can create private teams.
+// A team now belongs to its members (owner / admin / member) instead of a team leader's user id.
+addColumn('users', 'work_mode', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'interests', "TEXT NOT NULL DEFAULT '[]'");
+addColumn('users', 'signup_method', "TEXT NOT NULL DEFAULT 'admin'"); // admin | email | google
+addColumn('users', 'legacy_role', 'TEXT'); // the old company role (manager / tl / sme / agent), kept for reference
+addColumn('teams', 'owner_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+addColumn('teams', 'logo', 'TEXT');
+addColumn('teams', 'invite_code', 'TEXT');
+addColumn('teams', 'members_can_invite', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('conversations', 'team_id', 'INTEGER REFERENCES teams(id) ON DELETE CASCADE');
+db.exec(`
+CREATE TABLE IF NOT EXISTS team_members (
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member')),
+  joined_at TEXT NOT NULL DEFAULT ${NOW},
+  PRIMARY KEY (team_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+CREATE TABLE IF NOT EXISTS team_invites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT COLLATE NOCASE,
+  invited_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined','cancelled')),
+  created_at TEXT NOT NULL DEFAULT ${NOW},
+  responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_team_invites_user ON team_invites(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_conv_team ON conversations(team_id);
+`);
+// 8 characters without look-alikes (no 0/O, 1/I/L), so codes are easy to read out and type.
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const newInviteCode = () => Array.from(crypto.randomBytes(8), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+
+/** Rebuild a table from edited CREATE SQL: SQLite can't change a CHECK or REFERENCES in place. Run with foreign keys off. */
+function rebuildTable(name, edit) {
+  const sql = get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", name)?.sql;
+  const next = sql && edit(sql);
+  if (!next || next === sql) return;
+  const extras = all("SELECT sql FROM sqlite_master WHERE tbl_name = ? AND type IN ('index','trigger') AND sql IS NOT NULL", name).map((x) => x.sql);
+  const seq = get('SELECT seq FROM sqlite_sequence WHERE name = ?', name)?.seq;
+  const cols = db.prepare(`PRAGMA table_info(${name})`).all().map((c) => `"${c.name}"`).join(', ');
+  db.exec(next.replace(/^CREATE TABLE\s+"?\w+"?/i, `CREATE TABLE ${name}__new`));
+  db.exec(`INSERT INTO ${name}__new (${cols}) SELECT ${cols} FROM ${name}`);
+  db.exec(`DROP TABLE ${name}`);
+  db.exec(`ALTER TABLE ${name}__new RENAME TO ${name}`);
+  extras.forEach((s) => db.exec(s));
+  if (seq != null) {
+    run('DELETE FROM sqlite_sequence WHERE name = ?', name);
+    run('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)', name, seq);
+  }
+}
+
+// Once: convert the company hierarchy into member-based teams, keeping every team's feed, schedules and stories.
+if (getSetting('platform_v2') !== '1') {
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    tx(() => {
+      const WORK_TABLES = ['posts', 'schedules', 'team_settings', 'post_permissions', 'stories'];
+      // 1. Every team leader that work data points at gets a team row.
+      const refs = new Set(WORK_TABLES.flatMap((t) => all(`SELECT DISTINCT team_id FROM ${t} WHERE team_id IS NOT NULL`).map((x) => x.team_id)));
+      for (const tl of refs) {
+        if (get('SELECT id FROM teams WHERE tl_id = ?', tl)) continue;
+        const u = get('SELECT full_name FROM users WHERE id = ?', tl);
+        run('INSERT INTO teams (name, tl_id) VALUES (?, ?)', `Team ${u ? u.full_name.split(' ')[0] : tl}`, tl);
+      }
+      // 2. team_id now points at teams(id), and the role list gains the staff roles and 'user'.
+      for (const t of ['posts', 'schedules', 'team_settings', 'post_permissions']) {
+        rebuildTable(t, (s) => s.replace(/(team_id INTEGER[A-Z ]*?)REFERENCES users\(id\)/, '$1REFERENCES teams(id)'));
+      }
+      rebuildTable('users', (s) => s.replace(/CHECK \(role IN \([^)]*\)\)/,
+        "CHECK (role IN ('developer','sysadmin','employee','support','operations','user','manager','tl','sme','agent'))"));
+      // 3. Remap team leader ids to team ids (negate first so primary keys never collide mid-update).
+      for (const t of WORK_TABLES) {
+        run(`UPDATE ${t} SET team_id = -team_id WHERE team_id IS NOT NULL`);
+        run(`UPDATE ${t} SET team_id = (SELECT tm.id FROM teams tm WHERE tm.tl_id = -${t}.team_id) WHERE team_id < 0`);
+      }
+      // 4. Memberships: TL → owner, manager and SMEs → admins, agents → members. Each team gets a General channel.
+      for (const team of all('SELECT * FROM teams')) {
+        const exists = (id) => id && get('SELECT id FROM users WHERE id = ?', id);
+        const add = (uid, role) => exists(uid) && run(
+          `INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)
+           ON CONFLICT(team_id, user_id) DO NOTHING`, team.id, uid, role);
+        const owner = [team.tl_id, team.manager_id, team.created_by].find(exists) || null;
+        add(owner, 'owner');
+        add(team.manager_id, 'admin');
+        add(team.sme_id, 'admin');
+        if (team.tl_id) {
+          all("SELECT id FROM users WHERE team_leader_id = ? AND role = 'sme'", team.tl_id).forEach((u) => add(u.id, 'admin'));
+          all("SELECT id FROM users WHERE team_leader_id = ? AND role = 'agent'", team.tl_id).forEach((u) => add(u.id, 'member'));
+        }
+        run('UPDATE teams SET owner_id = ?, invite_code = ? WHERE id = ?', owner, newInviteCode(), team.id);
+        const members = all('SELECT user_id, role FROM team_members WHERE team_id = ?', team.id);
+        if (!members.length) continue;
+        const conv = Number(run("INSERT INTO conversations (type, name, created_by, team_id) VALUES ('group', 'general', ?, ?)", owner, team.id).lastInsertRowid);
+        members.forEach((m) => run('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)', conv, m.user_id, m.role === 'member' ? 'member' : 'admin'));
+      }
+      // 5. Company roles become regular members; anyone already on a team starts with Work Mode on.
+      run("UPDATE users SET legacy_role = role, role = 'user' WHERE role IN ('manager','tl','sme','agent')");
+      run('UPDATE users SET work_mode = 1 WHERE id IN (SELECT user_id FROM team_members)');
+      setSetting('platform_v2', '1');
+    });
+    const broken = db.prepare('PRAGMA foreign_key_check').all();
+    if (broken.length) console.warn(`[hunch] platform migration: ${broken.length} rows with a broken reference`, broken.slice(0, 5));
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
 // Railway: without a volume the database is wiped on every update (all accounts, posts and passwords reset).
 if (process.env.NODE_ENV === 'production' && process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   console.warn('[hunch] WARNING: no Railway volume is attached. The database is erased on every deploy. Attach a volume at /data.');

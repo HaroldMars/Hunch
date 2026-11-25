@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { MOOD_KEYS, ROLE_LABELS } from '../../../shared/constants.js';
+import { MOOD_KEYS, ROLE_LABELS, STAFF_ROLES, isStaffRole } from '../../../shared/constants.js';
 import { get, all, run, tx, getSetting, setSetting, DEFAULT_SETTINGS, codeFor } from '../db.js';
-import { auth, requireModule, creatableRoles, manageableRoles, teamScope, modulesFor } from '../auth.js';
+import { auth, requireModule, creatableRoles, manageableRoles, assignableRoles, teamScope, modulesFor } from '../auth.js';
 import { sendWelcome, sendPasswordReset, mailEnabled } from '../mailer.js';
 import { h, fail, randomPassword, nowIso, localDay, attachmentUpload, fileUrl, selfUser, deleteStoredFiles, attachmentUrls } from '../util.js';
 import { notify, notifyStaff } from '../notify.js';
@@ -13,7 +13,7 @@ const r = Router();
 r.use(auth({ app: 'admin' }));
 
 const STAFF_COLS = `id, user_code, username, email, full_name, avatar, role, status, team_leader_id, can_create_accounts,
-  must_change_password, verified, job_title, created_at, last_login_at, last_active_at, created_by`;
+  must_change_password, verified, job_title, created_at, last_login_at, last_active_at, created_by, signup_method, work_mode`;
 
 // Resolve the team a request may look at. TL/SME are pinned to their own team.
 function resolveTeam(req) {
@@ -91,21 +91,65 @@ r.get('/reports/moods', requireModule('reports'), h((req, res) => {
   res.json(rows);
 }));
 
+// ---------- Moderation: content reports and support requests ----------
+const REPORT_STATUS = ['open', 'resolved', 'dismissed'];
+function reportTarget(r) {
+  const who = (id) => (id ? get('SELECT id, full_name, user_code, avatar, status FROM users WHERE id = ?', id) : null);
+  switch (r.target_type) {
+    case 'user': { const u = who(r.target_id); return u && { label: u.full_name, sub: u.user_code, user: u }; }
+    case 'post': { const p = get('SELECT id, user_id, text, team_id FROM posts WHERE id = ?', r.target_id); return p && { label: p.text.slice(0, 200) || '(photo post)', sub: p.team_id ? 'Work post' : 'Post', user: who(p.user_id), removable: true }; }
+    case 'story': { const st = get('SELECT id, user_id, text FROM stories WHERE id = ?', r.target_id); return st && { label: st.text.slice(0, 200) || '(photo story)', sub: 'Story', user: who(st.user_id), removable: true }; }
+    case 'comment': { const c = get('SELECT id, user_id, text FROM comments WHERE id = ?', r.target_id); return c && { label: c.text.slice(0, 200), sub: 'Comment', user: who(c.user_id), removable: true }; }
+    case 'conversation': { const c = get('SELECT id, name, type, team_id FROM conversations WHERE id = ?', r.target_id); return c && { label: c.name || 'Direct chat', sub: c.team_id ? 'Team channel' : 'Group chat' }; }
+    default: return null;
+  }
+}
+r.get('/content-reports', requireModule('reports'), h((req, res) => {
+  const support = req.query.kind === 'support';
+  const status = REPORT_STATUS.includes(req.query.status) ? req.query.status : '';
+  const rows = all(`SELECT * FROM reports WHERE ${support ? "target_type = 'support'" : "target_type != 'support'"} AND (? = '' OR status = ?) ORDER BY status = 'open' DESC, id DESC LIMIT 300`, status, status);
+  res.json(rows.map((x) => ({
+    ...x,
+    reporter: x.reporter_id ? get('SELECT id, full_name, email, user_code, avatar FROM users WHERE id = ?', x.reporter_id) : null,
+    target: support ? null : reportTarget(x),
+  })));
+}));
+r.patch('/content-reports/:id', requireModule('reports'), h((req, res) => {
+  const x = get('SELECT * FROM reports WHERE id = ?', Number(req.params.id)) || fail(404, 'Report not found.');
+  if (!REPORT_STATUS.includes(req.body?.status)) fail(400, 'Choose open, resolved or dismissed.');
+  run('UPDATE reports SET status = ? WHERE id = ?', req.body.status, x.id);
+  res.json({ ok: true });
+}));
+// Remove the reported post, story or comment, and resolve the report. The author is told why.
+r.post('/content-reports/:id/remove', requireModule('reports'), h((req, res) => {
+  const x = get('SELECT * FROM reports WHERE id = ?', Number(req.params.id)) || fail(404, 'Report not found.');
+  const table = { post: 'posts', story: 'stories', comment: 'comments' }[x.target_type];
+  if (!table) fail(400, 'Only posts, stories and comments can be removed here.');
+  const row = get(`SELECT id, user_id FROM ${table} WHERE id = ?`, x.target_id);
+  if (row) {
+    run(`DELETE FROM ${table} WHERE id = ?`, row.id);
+    notify({ userId: row.user_id, type: 'system', title: 'Content removed', body: `Your ${x.target_type} was removed by Hunch moderators for breaking the community guidelines.` });
+  }
+  run("UPDATE reports SET status = 'resolved' WHERE target_type = ? AND target_id = ? AND status = 'open'", x.target_type, x.target_id);
+  res.json({ ok: true, removed: !!row });
+}));
+
 // ---------- Announcements & daily reports ----------
 r.post('/announcements', requireModule('notifications'), h((req, res) => {
-  if (!['developer', 'manager'].includes(req.user.role)) fail(403, 'Only managers and developers can post announcements.');
+  if (!['developer', 'sysadmin', 'employee', 'operations'].includes(req.user.role)) fail(403, 'Customer Support can’t post announcements.');
   const { title = '', body = '', kind = 'announcement', audience = 'everyone' } = req.body || {};
   if (!title.trim() || !body.trim()) fail(400, 'Title and message are required.');
   if (!['announcement', 'app_update'].includes(kind)) fail(400, 'Invalid type.');
   if (kind === 'app_update' && req.user.role !== 'developer') fail(403, 'Only developers can publish app updates.');
-  if (!['everyone', 'staff', 'agents'].includes(audience)) fail(400, 'Invalid audience.');
+  // 'agents' (old clients) means everyone who is not staff.
+  if (!['everyone', 'staff', 'agents', 'users'].includes(audience)) fail(400, 'Invalid audience.');
   const id = Number(run('INSERT INTO announcements (kind, title, body, audience, created_by) VALUES (?, ?, ?, ?, ?)', kind, title.trim(), body.trim(), audience, req.user.id).lastInsertRowid);
   const recipients = all("SELECT id, role FROM users WHERE status = 'active'");
   const type = kind === 'app_update' ? 'app_update' : 'announcement';
   for (const u of recipients) {
-    const isStaff = u.role !== 'agent';
+    const isStaff = isStaffRole(u.role);
     if (audience === 'staff' && !isStaff) continue;
-    if (audience === 'agents' && isStaff) continue;
+    if (['agents', 'users'].includes(audience) && isStaff) continue;
     notify({ userId: u.id, audience: 'client', type, actorId: req.user.id, entityType: 'announcement', entityId: id, title: title.trim(), body: body.trim() });
     if (isStaff) notify({ userId: u.id, audience: 'admin', type, actorId: req.user.id, entityType: 'announcement', entityId: id, title: title.trim(), body: body.trim() });
   }
@@ -117,7 +161,7 @@ r.get('/announcements', requireModule('notifications'), h((_req, res) => {
 }));
 
 export function sendDailyReports(day = localDay()) {
-  const staff = all("SELECT * FROM users WHERE status = 'active' AND role != 'agent'");
+  const staff = all(`SELECT * FROM users WHERE status = 'active' AND role IN (${STAFF_ROLES.map(() => '?').join(',')})`, ...STAFF_ROLES);
   let sent = 0;
   for (const u of staff) {
     const scope = teamScope(u);
@@ -136,7 +180,7 @@ export function sendDailyReports(day = localDay()) {
 }
 
 r.post('/reports/daily/generate', requireModule('notifications'), h((req, res) => {
-  if (!['developer', 'manager'].includes(req.user.role)) fail(403, 'Only managers and developers can trigger daily reports.');
+  if (!['developer', 'sysadmin', 'operations'].includes(req.user.role)) fail(403, 'Only developers, system administrators and operations can trigger daily reports.');
   res.json({ sent: sendDailyReports() });
 }));
 
@@ -146,15 +190,8 @@ r.get('/reports/daily', requireModule('notifications'), h((req, res) => {
 
 // ---------- Account registration ----------
 r.get('/accounts/options', h((req, res) => {
-  const scope = teamScope(req.user);
-  res.json({
-    roles: creatableRoles(req.user),
-    // Each option is a team, identified by its team leader's id (members link to the TL).
-    teamLeaders: scope !== null
-      ? all("SELECT u.id, u.full_name, u.user_code, t.name team_name FROM users u LEFT JOIN teams t ON t.tl_id = u.id WHERE u.id = ? AND u.role = 'tl'", scope)
-      : all(`SELECT u.id, u.full_name, u.user_code, t.name team_name FROM teams t JOIN users u ON u.id = t.tl_id
-             WHERE t.status = 'active' AND u.role = 'tl' AND u.status = 'active' ORDER BY t.name COLLATE NOCASE`),
-  });
+  // Registration creates Hunch staff accounts only; everyone else signs up in the Hunch app.
+  res.json({ roles: creatableRoles(req.user), teamLeaders: [] });
 }));
 
 function createAccount(creator, body) {
@@ -163,34 +200,27 @@ function createAccount(creator, body) {
   const full_name = String(body.full_name || '').trim();
   const email = String(body.email || '').trim().toLowerCase();
   const username = String(body.username || '').trim() || null;
-  const role = String(body.role || 'agent');
+  const role = String(body.role || '');
   if (!full_name) fail(400, 'Full name is required.');
   if (!/^\S+@\S+\.\S+$/.test(email)) fail(400, 'A valid email is required.');
   if (username && !/^[A-Za-z0-9._-]{3,30}$/.test(username)) fail(400, 'Username must be 3–30 letters, numbers, dots, dashes or underscores.');
   if (!allowed.includes(role)) fail(403, `You can't create ${ROLE_LABELS[role] || role} accounts.`);
   if (get('SELECT id FROM users WHERE email = ?', email)) fail(409, 'That email is already registered.');
   if (username && get('SELECT id FROM users WHERE username = ?', username)) fail(409, 'That username is taken.');
-  let tl = Number(body.team_leader_id) || null;
-  const scope = teamScope(creator);
-  if (scope !== null) tl = scope; // TL/SME can only add to their own team
-  if (['agent', 'sme'].includes(role) && tl && !get("SELECT id FROM users WHERE id = ? AND role = 'tl'", tl)) fail(400, 'Choose a valid team leader.');
-  if (!['agent', 'sme'].includes(role)) tl = null;
   const temp = randomPassword();
   const id = tx(() => {
     const id = Number(run(
-      `INSERT INTO users (username, email, password_hash, full_name, role, team_leader_id, job_title, must_change_password, verified, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?)`,
-      username, email, bcrypt.hashSync(temp, 10), full_name, role, tl, String(body.job_title || ROLE_LABELS[role]).slice(0, 80), creator.id
+      `INSERT INTO users (username, email, password_hash, full_name, role, job_title, must_change_password, verified, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)`,
+      username, email, bcrypt.hashSync(temp, 10), full_name, role, String(body.job_title || ROLE_LABELS[role]).slice(0, 80), creator.id
     ).lastInsertRowid);
     run('UPDATE users SET user_code = ? WHERE id = ?', codeFor(id), id);
-    if (role === 'sme' && tl) run('UPDATE teams SET sme_id = ? WHERE tl_id = ? AND sme_id IS NULL', id, tl);
     return id;
   });
   notifyStaff({
-    roles: ['developer', 'manager'], type: 'new_user', actorId: creator.id, entityType: 'user', entityId: id,
+    roles: ['developer', 'sysadmin'], type: 'new_user', actorId: creator.id, entityType: 'user', entityId: id,
     title: 'New user registered', body: `${creator.full_name} created a ${ROLE_LABELS[role]} account for ${full_name}.`,
   });
-  if (tl && tl !== creator.id) notify({ userId: tl, audience: 'admin', type: 'new_user', actorId: creator.id, entityType: 'user', entityId: id, title: 'New team member', body: `${full_name} (${ROLE_LABELS[role]}) was added to your team.` });
   // Email the new person their sign-in details (only when SMTP is configured and the address is real).
   sendWelcome(email, full_name.split(' ')[0], username || email, temp, role).then((ok) => ok && console.log(`[hunch] Welcome email sent to new ${role}.`));
   return { user: get(`SELECT ${STAFF_COLS} FROM users WHERE id = ?`, id), tempPassword: temp, emailed: mailEnabled() };
@@ -226,7 +256,7 @@ r.get('/users', requireModule('users'), h((req, res) => {
      ORDER BY u.id DESC LIMIT 500`,
     q, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, role, role, status, status
   );
-  res.json({ users: rows, manageable: manageableRoles(req.user) });
+  res.json({ users: rows, manageable: manageableRoles(req.user), assignable: assignableRoles(req.user) });
 }));
 
 r.patch('/users/:id', requireModule('users'), h((req, res) => {
@@ -237,10 +267,8 @@ r.patch('/users/:id', requireModule('users'), h((req, res) => {
   if (target.id === req.user.id && (req.body.status === 'disabled' || (req.body.role && req.body.role !== target.role))) fail(400, "You can't disable or demote yourself.");
   const b = req.body || {};
   if (b.role !== undefined && b.role !== target.role) {
-    if (!can.includes(b.role)) fail(403, "You can't assign that role.");
-    if (['manager', 'developer'].includes(b.role) || ['manager', 'developer'].includes(target.role)) {
-      if (!modulesFor(req.user).includes('admins')) fail(403, 'Only developers can manage admin roles.');
-    }
+    if (!assignableRoles(req.user).includes(b.role)) fail(403, "You can't assign that role.");
+    if ((isStaffRole(b.role) || isStaffRole(target.role)) && !modulesFor(req.user).includes('admins')) fail(403, 'Only developers and system administrators can manage staff roles.');
   }
   const sets = [];
   const vals = [];
@@ -254,28 +282,11 @@ r.patch('/users/:id', requireModule('users'), h((req, res) => {
   }
   if (b.job_title !== undefined) setField('job_title', String(b.job_title).slice(0, 80));
   if (b.role !== undefined) setField('role', b.role);
-  const newRole = b.role ?? target.role;
-  if (b.team_leader_id !== undefined || b.role !== undefined) {
-    const tl = Number(b.team_leader_id ?? target.team_leader_id) || null;
-    if (tl && !get("SELECT id FROM users WHERE id = ? AND role = 'tl'", tl)) fail(400, 'Invalid team leader.');
-    setField('team_leader_id', ['agent', 'sme'].includes(newRole) ? tl : null);
-  }
   if (b.status !== undefined) {
     if (!['active', 'disabled'].includes(b.status)) fail(400, 'Invalid status.');
     setField('status', b.status);
   }
-  if (b.can_create_accounts !== undefined) {
-    if (!['tl', 'sme'].includes(newRole)) fail(400, 'Account-creation permission applies to Team Leaders and SMEs.');
-    setField('can_create_accounts', b.can_create_accounts ? 1 : 0);
-    if (!!b.can_create_accounts !== !!target.can_create_accounts) {
-      notify({ userId: target.id, audience: 'admin', type: 'system', actorId: req.user.id, title: 'Permission updated', body: b.can_create_accounts ? `${req.user.full_name} granted you permission to create agent accounts.` : `${req.user.full_name} removed your permission to create accounts.` });
-    }
-  }
   if (sets.length) run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, ...vals, target.id);
-  // Keep team assignments consistent when someone stops being a TL or SME.
-  if (target.role === 'tl' && newRole !== 'tl') run('UPDATE teams SET tl_id = NULL WHERE tl_id = ?', target.id);
-  if (target.role === 'sme' && newRole !== 'sme') run('UPDATE teams SET sme_id = NULL WHERE sme_id = ?', target.id);
-  if (target.role === 'manager' && newRole !== 'manager') run('UPDATE teams SET manager_id = NULL WHERE manager_id = ?', target.id);
   res.json(get(`SELECT ${STAFF_COLS} FROM users WHERE id = ?`, target.id));
 }));
 
@@ -299,7 +310,7 @@ r.get('/password-requests', requireModule('users'), h((req, res) => {
 
 // ---------- Admin management (developer) ----------
 r.get('/admins', requireModule('admins'), h((_req, res) => {
-  res.json(all(`SELECT ${STAFF_COLS} FROM users WHERE role IN ('developer','manager','tl','sme') ORDER BY CASE role WHEN 'developer' THEN 0 WHEN 'manager' THEN 1 WHEN 'tl' THEN 2 ELSE 3 END, full_name`));
+  res.json(all(`SELECT ${STAFF_COLS} FROM users WHERE role IN (${STAFF_ROLES.map(() => '?').join(',')}) ORDER BY CASE role WHEN 'developer' THEN 0 WHEN 'sysadmin' THEN 1 ELSE 2 END, full_name`, ...STAFF_ROLES));
 }));
 
 // ---------- System settings (developer) ----------
@@ -372,7 +383,7 @@ r.post('/email/templates', requireModule('email'), h((req, res) => {
 r.put('/email/templates/:id', requireModule('email'), h((req, res) => {
   const t = get('SELECT * FROM email_templates WHERE id = ?', Number(req.params.id));
   if (!t) fail(404, 'Template not found.');
-  if (t.created_by !== req.user.id && !['developer', 'manager'].includes(req.user.role)) fail(403, 'You can only edit your own templates.');
+  if (t.created_by !== req.user.id && !['developer', 'sysadmin'].includes(req.user.role)) fail(403, 'You can only edit your own templates.');
   const { name = t.name, subject = t.subject, body = t.body } = req.body || {};
   if (!String(name).trim()) fail(400, 'Template name is required.');
   run('UPDATE email_templates SET name = ?, subject = ?, body = ?, updated_at = ? WHERE id = ?', String(name).trim(), subject, body, nowIso(), t.id);
@@ -381,7 +392,7 @@ r.put('/email/templates/:id', requireModule('email'), h((req, res) => {
 r.delete('/email/templates/:id', requireModule('email'), h((req, res) => {
   const t = get('SELECT * FROM email_templates WHERE id = ?', Number(req.params.id));
   if (!t) fail(404, 'Template not found.');
-  if (t.created_by !== req.user.id && !['developer', 'manager'].includes(req.user.role)) fail(403, 'You can only delete your own templates.');
+  if (t.created_by !== req.user.id && !['developer', 'sysadmin'].includes(req.user.role)) fail(403, 'You can only delete your own templates.');
   run('DELETE FROM email_templates WHERE id = ?', t.id);
   res.json({ ok: true });
 }));

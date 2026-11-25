@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { get, run, DATA_DIR } from './db.js';
 import { localDay, nowIso } from './util.js';
+import { isStaffRole } from '../../shared/constants.js';
+
+export const isStaff = (u) => isStaffRole(u?.role);
 
 // Persist a random secret so tokens survive restarts without hard-coding one.
 const secretFile = path.join(DATA_DIR, '.jwt-secret');
@@ -42,7 +45,8 @@ export const auth = ({ ready = true, app = null } = {}) => (req, res, next) => {
   if (app && payload.app !== app) return res.status(403).json({ error: 'Wrong application for this session.' });
   const user = get('SELECT * FROM users WHERE id = ?', payload.sub);
   if (!user || user.status !== 'active') return res.status(401).json({ error: 'Account is not active.' });
-  if (payload.app === 'admin' && user.role === 'agent') return res.status(403).json({ error: 'No admin access.' });
+  // The Admin Dashboard is for Hunch staff only.
+  if (payload.app === 'admin' && !isStaff(user)) return res.status(403).json({ error: 'No admin access.' });
   if (ready) {
     if (user.must_change_password) return res.status(428).json({ error: 'Password change required.', code: 'CHANGE_PASSWORD' });
     if (!user.verified) return res.status(428).json({ error: 'Account verification required.', code: 'VERIFY' });
@@ -54,29 +58,32 @@ export const auth = ({ ready = true, app = null } = {}) => (req, res, next) => {
   next();
 };
 
-// ---------- RBAC ----------
+// ---------- RBAC (Admin Dashboard, staff only) ----------
+// Developers and System Administrators run the whole platform. Hunch Employees, Customer Support and Operations
+// get the modules their job needs. Regular users have no modules: they never reach the dashboard.
 export const MODULES = {
-  developer: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email', 'users', 'admins', 'settings', 'register'],
-  manager: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email', 'users', 'register'],
-  tl: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email'],
-  sme: ['stats', 'reports', 'workspace', 'teams', 'notifications', 'email'],
-  agent: [],
+  developer: ['stats', 'reports', 'teams', 'notifications', 'email', 'users', 'admins', 'settings', 'register'],
+  sysadmin: ['stats', 'reports', 'teams', 'notifications', 'email', 'users', 'admins', 'settings', 'register'],
+  employee: ['stats', 'reports', 'teams', 'notifications', 'email', 'users'],
+  support: ['reports', 'notifications', 'email', 'users'],
+  operations: ['stats', 'reports', 'teams', 'notifications', 'email'],
 };
-export const modulesFor = (u) => {
-  const m = [...(MODULES[u.role] || [])];
-  if ((u.role === 'tl' || u.role === 'sme') && u.can_create_accounts) m.push('register');
-  return m;
-};
-export const creatableRoles = (u) => {
-  if (u.role === 'developer') return ['agent', 'sme', 'tl', 'manager', 'developer'];
-  if (u.role === 'manager') return ['agent', 'sme', 'tl'];
-  if ((u.role === 'tl' || u.role === 'sme') && u.can_create_accounts) return ['agent'];
+export const modulesFor = (u) => (isStaff(u) ? [...(MODULES[u.role] || [])] : []);
+const STAFF_ROLES_ALL = ['developer', 'sysadmin', 'employee', 'support', 'operations'];
+const MEMBER_ROLES = ['user', 'manager', 'tl', 'sme', 'agent'];
+/** Staff accounts are created in Registration; regular users sign up themselves. */
+export const creatableRoles = (u) =>
+  u.role === 'developer' ? STAFF_ROLES_ALL : u.role === 'sysadmin' ? STAFF_ROLES_ALL.filter((r) => r !== 'developer') : [];
+/** Accounts a staff member may edit in User Management (status, password resets, role). */
+export const manageableRoles = (u) => {
+  if (u.role === 'developer') return [...STAFF_ROLES_ALL, ...MEMBER_ROLES];
+  if (u.role === 'sysadmin') return [...STAFF_ROLES_ALL.filter((r) => r !== 'developer'), ...MEMBER_ROLES];
+  if (['employee', 'support'].includes(u.role)) return MEMBER_ROLES;
   return [];
 };
-// Roles a user may edit in User Management.
-export const manageableRoles = (u) =>
-  u.role === 'developer' ? ['agent', 'sme', 'tl', 'manager', 'developer'] : u.role === 'manager' ? ['agent', 'sme', 'tl'] : [];
-// Team scope: TLs see their own team, SMEs see the team of their TL. null = everything.
-export const teamScope = (u) => (u.role === 'tl' ? u.id : u.role === 'sme' ? u.team_leader_id || -1 : null);
+/** Roles a staff member may give someone. Support staff can't promote anyone to staff. */
+export const assignableRoles = (u) => (['developer', 'sysadmin'].includes(u.role) ? [...creatableRoles(u), 'user'] : ['user']);
+// Platform staff see every team's aggregate numbers; there is no per-team scope any more.
+export const teamScope = () => null;
 export const requireModule = (mod) => (req, res, next) =>
   modulesFor(req.user).includes(mod) ? next() : res.status(403).json({ error: 'You do not have access to this module.' });
