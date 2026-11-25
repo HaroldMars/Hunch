@@ -1332,54 +1332,6 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .ep-section { margin: 22px 0 4px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
 .input.readonly { background: var(--surface-2); color: var(--text-2); display: flex; align-items: center; gap: 8px; }
 
-/* ---------- Mood Clouds (replaces note bubbles) ---------- */
-.mood-clouds { padding: 6px 16px 10px; display: flex; flex-direction: column; gap: 12px; }
-.mcs-head { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
-.mcs-head h3 { margin: 0; font-size: 12.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
-.mcs-rule { flex: 1; height: 1px; background: var(--line); }
-.mcs-more { align-self: center; border: 0; background: none; color: var(--primary); font-weight: 700; font-size: 13.5px; padding: 4px 8px; }
-.mcs-empty { margin: 0; text-align: center; color: var(--text-3); font-size: 13px; }
-/* The cloud: soft gray, no stroke, smooth shadow, rounded organic silhouette (two soft puffs on top). */
-.mood-cloud { --cc: transparent; --cloud: color-mix(in srgb, var(--cc) 7%, var(--surface-2)); position: relative; margin-top: 12px; padding: 14px 16px 12px; border-radius: 30px 30px 30px 30px / 26px 26px 30px 30px;
-  background: var(--cloud);
-  box-shadow: 0 10px 28px -12px rgba(0, 0, 0, 0.45), 0 2px 6px -2px rgba(0, 0, 0, 0.18); color: var(--text); text-align: left; cursor: default; }
-.mood-cloud::before, .mood-cloud::after { content: ''; position: absolute; z-index: 0; border-radius: 50%; background: var(--cloud); pointer-events: none; }
-.mood-cloud::before { width: 64px; height: 40px; top: -13px; left: 24px; }
-.mood-cloud::after { width: 46px; height: 30px; top: -9px; left: 74px; }
-.mc-tag { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; margin-top: 2px; padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--cc) 18%, transparent); }
-.mood-cloud > * { position: relative; z-index: 1; }
-.mood-cloud[role='button'] { cursor: pointer; transition: transform 0.15s ease; }
-.mood-cloud[role='button']:active { transform: scale(0.985); }
-.mc-thought { --cc: #9aa4b8; } .mc-mood { --cc: #ffc83d; } .mc-question { --cc: #5b8def; }
-.mc-quote { --cc: #b07cff; } .mc-update { --cc: #3ddc84; } .mc-achievement { --cc: #ff9f43; }
-.mc-head { display: flex; align-items: center; gap: 10px; }
-.mc-who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.mc-who b { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mc-tag { font-size: 12.5px; color: var(--text-2); font-weight: 600; }
-.mc-tag em { font-style: normal; color: var(--text-3); margin-left: 4px; }
-.mc-liked { font-size: 15px; }
-.mc-text { margin: 10px 2px 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.mc-text.quote { font-style: italic; }
-.mc-time { margin: 8px 2px 0; font-size: 12px; color: var(--text-3); }
-.mc-time.over { color: var(--danger, #ff4d67); }
-.mc-lg { padding: 18px 20px 14px; }
-.mc-lg .mc-text { font-size: 17px; }
-.mc-new { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 0; border-radius: 26px; background: var(--surface-2); color: var(--text); text-align: left;
-  box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.45); }
-.mc-new > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.mc-new b { font-size: 14.5px; } .mc-new small { color: var(--text-3); font-size: 12.5px; }
-.mc-plus { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--primary); color: #fff; flex-shrink: 0; }
-.mc-view { padding: 14px 2px 4px; }
-.mc-chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; scrollbar-width: none; }
-.mc-chips button { flex-shrink: 0; border: 0; border-radius: 18px; padding: 8px 13px; font-weight: 700; font-size: 13px; background: var(--surface-2); color: var(--text-2); }
-.mc-chips button.on { background: var(--text); color: var(--bg); }
-.mc-compose { margin-top: 18px; }
-.mc-compose textarea { width: 100%; margin-top: 10px; border: 0; outline: 0; resize: none; background: none; color: var(--text); font: inherit; font-size: 16px; line-height: 1.5; }
-.mc-moods { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.mc-moods button { border: 0; border-radius: 14px; background: var(--surface-2); color: var(--text-2); padding: 8px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.mc-moods button span { font-size: 22px; } .mc-moods button small { font-size: 11px; font-weight: 600; }
-.mc-moods button.on { background: color-mix(in srgb, var(--primary) 26%, var(--surface-2)); color: var(--text); }
-
 /* ---------- Story content stack (caption · mood · location · music) ---------- */
 .so-stack { position: absolute; left: 14px; right: 14px; bottom: 96px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .so-layer.compact .so-stack { bottom: 18px; right: 74px; }
@@ -1483,3 +1435,44 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .hs-postbar { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .hs-post { width: 100%; height: 54px; border: 0; border-radius: 16px; background: var(--primary); color: #fff; font-weight: 800; font-size: 15px; letter-spacing: .08em; display: grid; place-items: center; }
 .hs-post:disabled { opacity: .45; }
+
+/* ---------- Note composer (create / edit): Mood Cloud editor ---------- */
+.cn { gap: 0; }
+.cn-top { display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: 8px; padding: 12px 16px; }
+.cn-top h2 { margin: 0; text-align: center; font-size: 17px; }
+.cn-icon { width: 44px; height: 44px; border-radius: 50%; border: 0; display: grid; place-items: center; background: var(--surface-2); color: var(--text); }
+.cn-share { border: 0; border-radius: 999px; height: 40px; padding: 0 20px; background: var(--primary); color: #fff; font-weight: 800; font-size: 15px; }
+.cn-share:disabled { opacity: .4; }
+.cn-body { flex: 1; overflow-y: auto; padding: 22px 16px 16px; display: flex; flex-direction: column; gap: 22px; }
+/* The cloud: soft gray, no stroke, smooth shadow, two soft puffs on top. Static (no floating animation). */
+.cn-cloud { --cc: #9aa4b8; --cloud: color-mix(in srgb, var(--cc) 8%, var(--surface-2)); position: relative; margin-top: 14px; padding: 18px 18px 12px;
+  border-radius: 34px 34px 34px 34px / 30px 30px 34px 34px; background: var(--cloud);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.55), 0 3px 10px -4px rgba(0, 0, 0, 0.2); transition: background .2s ease; }
+.cn-cloud::before, .cn-cloud::after { content: ''; position: absolute; border-radius: 50%; background: var(--cloud); transition: background .2s ease; }
+.cn-cloud::before { width: 84px; height: 52px; top: -18px; left: 30px; }
+.cn-cloud::after { width: 60px; height: 40px; top: -12px; left: 98px; }
+.cn-cloud > * { position: relative; z-index: 1; }
+.cn-thought { --cc: #9aa4b8; } .cn-mood { --cc: #ffc83d; } .cn-question { --cc: #5b8def; }
+.cn-quote { --cc: #b07cff; } .cn-update { --cc: #3ddc84; } .cn-achievement { --cc: #ff9f43; }
+.cn-head { display: flex; align-items: center; gap: 12px; }
+.cn-who { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cn-who b { font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cn-tag { align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; color: var(--text-2); background: color-mix(in srgb, var(--cc) 20%, transparent); }
+.cn-cloud textarea { width: 100%; margin-top: 14px; border: 0; outline: 0; resize: none; background: none; color: var(--text); font: inherit; font-size: 18px; line-height: 1.45; min-height: 84px; }
+.cn-cloud textarea::placeholder { color: var(--text-3); }
+.cn-quote textarea { font-style: italic; }
+.cn-count { text-align: right; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.cn-count.over { color: #ff4d67; font-weight: 700; }
+.cn-section { display: flex; flex-direction: column; gap: 10px; }
+.cn-label { font-size: 13px; font-weight: 800; color: var(--text-2); }
+.cn-label small { font-weight: 600; color: var(--text-3); margin-left: 4px; }
+.cn-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.cn-chips button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 9px 14px; background: var(--surface-2); color: var(--text-2); font-weight: 700; font-size: 13.5px; white-space: nowrap; }
+.cn-chips button span { font-size: 16px; }
+.cn-chips button.on { background: var(--text); color: var(--bg); }
+.cn-moods { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.cn-moods::-webkit-scrollbar { display: none; }
+.cn-moods button { flex-shrink: 0; width: 64px; border: 0; border-radius: 16px; padding: 8px 2px; background: var(--surface-2); color: var(--text-2); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.cn-moods button span { font-size: 24px; } .cn-moods button small { font-size: 11px; font-weight: 600; }
+.cn-moods button.on { background: color-mix(in srgb, var(--primary) 24%, var(--surface-2)); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--primary); }
+.cn-foot { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); color: var(--text-3); font-size: 13px; font-weight: 600; border-top: 1px solid var(--line); }
