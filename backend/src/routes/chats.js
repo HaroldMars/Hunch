@@ -5,6 +5,7 @@ import { h, fail, imageUpload, fileUpload, fileUrl, deleteStoredFiles, attachmen
 import { emitToUsers, isOnline } from '../realtime.js';
 import { notifyMessage } from '../notify.js';
 import { hydratePost } from './posts.js';
+import { canManageTeam, canAccessTeam, teamRow } from '../teams.js';
 
 const r = Router();
 r.use(auth());
@@ -24,7 +25,8 @@ function requireMember(cid, uid) {
 function requireGroupAdmin(cid, uid) {
   const x = requireMember(cid, uid);
   if (x.conv.type !== 'group') fail(400, 'Only group chats have settings.');
-  if (x.member.role !== 'admin') fail(403, 'Only group admins can change group settings.');
+  // Team channels are run by the team's owners and admins.
+  if (x.conv.team_id ? !canManageTeam(uid, x.conv.team_id) : x.member.role !== 'admin') fail(403, 'Only group admins can change group settings.');
   return x;
 }
 
@@ -92,13 +94,15 @@ function conversationOut(conv, me) {
   const last = get('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1', conv.id);
   const unread = get('SELECT COUNT(*) c FROM messages WHERE conversation_id = ? AND id > ? AND (sender_id IS NULL OR sender_id != ?)', conv.id, mine?.last_read_id || 0, me).c;
   const other = conv.type === 'direct' ? members.find((m) => m.id !== me) : null;
+  const team = conv.team_id ? teamRow(conv.team_id) : null;
   return {
     ...conv,
+    team: team && { id: team.id, name: team.name, logo: team.logo },
     title: conv.type === 'group' ? conv.name : other?.full_name || 'Chat',
     avatar: conv.type === 'group' ? conv.photo : other?.avatar,
     other,
     members,
-    my_role: mine?.role,
+    my_role: mine?.member_role, // role in this chat (admin | member), not the account role
     muted: !!get('SELECT muted FROM conversation_members WHERE conversation_id = ? AND user_id = ?', conv.id, me)?.muted,
     archived: !!get('SELECT archived FROM conversation_members WHERE conversation_id = ? AND user_id = ?', conv.id, me)?.archived,
     blocked: conv.type === 'direct' && other ? isBlocked(me, other.id) : false,
@@ -156,9 +160,12 @@ r.get('/conversations', h((req, res) => {
     `SELECT c.* FROM conversations c JOIN conversation_members m ON m.conversation_id = c.id
      WHERE m.user_id = ? ORDER BY c.updated_at DESC`, me
   );
-  // Hide empty direct chats from the list.
+  // Hide empty direct chats from the list. Personal chats and team channels are listed separately.
   const archived = req.query.archived === '1';
-  res.json(convs.map((c) => conversationOut(c, me)).filter((c) => (c.type === 'group' || c.last_message) && c.archived === archived));
+  const teams = req.query.scope === 'teams';
+  res.json(convs
+    .filter((c) => (teams ? !!c.team_id && canAccessTeam(me, c.team_id) : !c.team_id))
+    .map((c) => conversationOut(c, me)).filter((c) => (c.type === 'group' || c.last_message) && (teams || c.archived === archived)));
 }));
 
 r.post('/conversations/direct', h((req, res) => {
@@ -229,8 +236,11 @@ r.post('/conversations/:id/photo', imageUpload.single('photo'), h((req, res) => 
   res.json(conversationOut(get('SELECT * FROM conversations WHERE id = ?', conv.id), req.user.id));
 }));
 
+const teamManaged = (conv) => { if (conv.team_id) fail(400, 'Team channel members follow the team. Manage people from the team in Work.'); };
+
 r.post('/conversations/:id/members', h((req, res) => {
   const { conv } = requireGroupAdmin(req.params.id, req.user.id);
+  teamManaged(conv);
   const ids = (req.body?.userIds || []).map(Number).filter((id) => !membership(conv.id, id));
   if (!ids.length) fail(400, 'Choose people to add.');
   if (ids.some((id) => !areFriends(req.user.id, id))) fail(403, 'You can only add your friends.');
@@ -247,6 +257,7 @@ r.delete('/conversations/:id/members/:userId', h((req, res) => {
   const target = Number(req.params.userId);
   const { conv, member } = requireMember(req.params.id, req.user.id);
   if (conv.type !== 'group') fail(400, 'Not a group chat.');
+  teamManaged(conv);
   if (target !== req.user.id && member.role !== 'admin') fail(403, 'Only group admins can remove members.');
   if (!membership(conv.id, target)) fail(404, 'Not a member.');
   const before = memberIds(conv.id);
@@ -267,6 +278,7 @@ r.delete('/conversations/:id/members/:userId', h((req, res) => {
 
 r.post('/conversations/:id/admins/:userId', h((req, res) => {
   const { conv } = requireGroupAdmin(req.params.id, req.user.id);
+  teamManaged(conv);
   const target = membership(conv.id, Number(req.params.userId));
   if (!target) fail(404, 'Not a member.');
   const role = target.role === 'admin' ? 'member' : 'admin';

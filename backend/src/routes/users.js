@@ -9,23 +9,14 @@ import {
 } from '../util.js';
 import { notify, notifyStaff } from '../notify.js';
 import { sessionPayload } from './auth.js';
-import { teamName, teamRow, teamOf } from '../teams.js';
+import { workTeams, teammateIds } from '../teams.js';
+import { readInterests } from './auth.js';
+import { parseList } from '../util.js';
 
-/** Workplace identity shown on a profile: team, department and (for managers) the teams they supervise. */
-function workInfo(u) {
-  const tlId = teamOf(get('SELECT id, role, team_leader_id FROM users WHERE id = ?', u.id));
-  const row = tlId ? teamRow(tlId) : null;
-  const managed = u.role === 'manager'
-    ? all("SELECT id, name, color, department FROM teams WHERE manager_id = ? AND status = 'active' ORDER BY name COLLATE NOCASE", u.id)
-    : [];
-  return {
-    team_leader: tlId && tlId !== u.id ? publicUser(tlId) : null,
-    team_name: tlId ? teamName(tlId) : null,
-    team_color: row?.color || null,
-    team_department: row?.department || managed[0]?.department || null,
-    managed_teams: managed,
-  };
-}
+/** Work data on a profile. Teams are private: only the account owner ever sees their own. */
+const ownWork = (u) => ({
+  teams: workTeams(u.id).map((t) => ({ id: t.id, name: t.name, logo: t.logo, my_role: t.my_role })),
+});
 const USERNAME = /^[a-z0-9._]{3,30}$/i;
 import { hydratePosts } from './posts.js';
 
@@ -73,11 +64,14 @@ r.get('/users/:id', h((req, res) => {
     friends: friendIds(u.id).length,
   };
   const mutuals = me === u.id ? 0 : friendIds(u.id).filter((id) => friendIds(me).includes(id)).length;
-  const work = canView ? workInfo(u) : {};
+  const self = me === u.id;
+  const interests = parseList(get('SELECT interests FROM users WHERE id = ?', u.id)?.interests);
   res.json({
     ...u,
-    ...work,
-    department: u.department || work.team_department || '',
+    // Department and teams are work data: hidden from everyone but the owner.
+    department: self ? req.user.department : '',
+    ...(self ? ownWork(u) : {}),
+    interests: canView || self ? interests : [],
     relation: relation(me, u.id),
     canView,
     counts,
@@ -89,6 +83,7 @@ r.get('/users/:id', h((req, res) => {
 r.patch('/users/me', h((req, res) => {
   const allowed = ['full_name', 'bio', 'job_title', 'department', 'location', 'privacy'];
   const b = req.body || {};
+  if (b.interests !== undefined) run('UPDATE users SET interests = ? WHERE id = ?', JSON.stringify(readInterests(b.interests)), req.user.id);
   if (b.username !== undefined) {
     const name = String(b.username || '').trim().replace(/^@/, '');
     if (!name) run('UPDATE users SET username = NULL WHERE id = ?', req.user.id);
@@ -173,12 +168,12 @@ r.get('/friends/suggestions', h((req, res) => {
   const pending = new Set(
     all('SELECT requester_id a, addressee_id b FROM friendships WHERE requester_id = ? OR addressee_id = ?', me, me).flatMap((x) => [x.a, x.b])
   );
-  const me_ = get('SELECT team_leader_id FROM users WHERE id = ?', me);
-  const candidates = all(`SELECT ${PUBLIC_COLS}, team_leader_id FROM users WHERE status = 'active' AND id != ? LIMIT 500`, me)
+  const mates = new Set(teammateIds(me));
+  const candidates = all(`SELECT ${PUBLIC_COLS} FROM users WHERE status = 'active' AND id != ? LIMIT 500`, me)
     .filter((u) => !mine.has(u.id) && !pending.has(u.id))
     .map((u) => {
       const mutual = friendIds(u.id).filter((id) => mine.has(id)).length;
-      const sameTeam = me_.team_leader_id && (u.team_leader_id === me_.team_leader_id || u.id === me_.team_leader_id) ? 1 : 0;
+      const sameTeam = mates.has(u.id) ? 1 : 0;
       return { ...u, mutual, sameTeam, score: mutual * 2 + sameTeam * 3 };
     })
     .sort((a, b) => b.score - a.score || a.full_name.localeCompare(b.full_name))
@@ -322,7 +317,7 @@ r.post('/support', h((req, res) => {
   const { subject = '', message = '' } = req.body || {};
   if (!String(subject).trim() || !String(message).trim()) fail(400, 'Add a subject and a message.');
   const id = Number(run("INSERT INTO reports (reporter_id, target_type, subject, reason) VALUES (?, 'support', ?, ?)", req.user.id, String(subject).slice(0, 150), String(message).slice(0, 2000)).lastInsertRowid);
-  notifyStaff({ roles: ['developer', 'manager'], type: 'support', actorId: req.user.id, entityType: 'support', entityId: id, title: `Support: ${String(subject).slice(0, 80)}`, body: `${req.user.full_name} (${req.user.email}): ${String(message).slice(0, 300)}` });
+  notifyStaff({ roles: ['developer', 'sysadmin', 'support'], type: 'support', actorId: req.user.id, entityType: 'support', entityId: id, title: `Support: ${String(subject).slice(0, 80)}`, body: `${req.user.full_name} (${req.user.email}): ${String(message).slice(0, 300)}` });
   res.status(201).json({ ok: true });
 }));
 

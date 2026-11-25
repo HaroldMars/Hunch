@@ -35,7 +35,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors(corsOptions));
 // Rate limits: a general ceiling per IP, and a much tighter one on sign-in and password endpoints.
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
-app.use(['/api/auth/login', '/api/auth/google', '/api/auth/forgot', '/api/auth/account-request', '/api/auth/verify', '/api/auth/change-password'],
+app.use(['/api/auth/login', '/api/auth/google', '/api/auth/signup', '/api/auth/forgot', '/api/auth/account-request', '/api/auth/verify', '/api/auth/change-password'],
   rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts. Please wait a few minutes and try again.' } }));
 app.use(express.json({ limit: '1mb' }));
 app.use((_req, res, next) => {

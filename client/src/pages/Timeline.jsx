@@ -56,17 +56,9 @@ export default function Timeline() {
   const [creating, setCreating] = useState(false);
   const [composing, setComposing] = useState(false);
   const [hideComposer, setHideComposer] = useState(false);
-  // The Work tab only exists for people on a team (or managers supervising one). Re-checked whenever the
-  // page regains focus, so a new assignment adds the tab and a removal takes it (and its content) away.
-  const [hasWork, setHasWork] = useState(null);
-  useEffect(() => {
-    const check = () => api('/work/context').then((c) => setHasWork(!!c?.team)).catch(() => setHasWork(false));
-    check();
-    const onVis = () => document.visibilityState === 'visible' && check();
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []);
-  useEffect(() => { if (hasWork === false && tab === 'work') setTab('foryou'); }, [hasWork, tab]);
+  // The Work tab is there while Work Mode is on (Settings → Work Mode), whether or not you're on a team yet.
+  const hasWork = !!user.work_mode;
+  useEffect(() => { if (!hasWork && tab === 'work') setTab('foryou'); }, [hasWork, tab]);
 
   // Smart posting bar: hides while scrolling down, slides back in when scrolling up.
   useEffect(() => {
@@ -122,7 +114,7 @@ export default function Timeline() {
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
-      {tab === 'work' ? (hasWork ? <WorkTab initialView={workView} /> : <Spinner />) : <>
+      {tab === 'work' ? (hasWork ? <WorkTab initialView={workView} /> : null) : <>
       <StoryBar groups={stories} onOpen={(i) => setViewer(i)} onCreate={() => setCreating(true)} />
       <MoodCheckin />
       {posts === null ? <Spinner /> : posts.length === 0 ? (

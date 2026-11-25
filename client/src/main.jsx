@@ -5,7 +5,7 @@ import Logo from '@shared/Logo.jsx';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppProvider, useApp } from './store.jsx';
 import { BottomNav } from './components/ui.jsx';
-import { RequestAccount, ChangePassword } from './pages/Auth.jsx';
+import { ChangePassword } from './pages/Auth.jsx';
 import { LoginScreen, Onboarding } from '@shared/auth/AuthScreens.jsx';
 import { api, setToken, consumeHandoff, ADMIN_URL } from './api.js';
 import Timeline from './pages/Timeline.jsx';
@@ -42,9 +42,10 @@ function Shell() {
   if (!session) {
     return (
       <Routes>
-        <Route path="/login" element={<LoginScreen api={api} appKind="client" otherAppUrl={ADMIN_URL} settings={{ ...settings, requestAccountHref: '/request-account' }}
-          onSession={(res, remember) => { setToken(res.token, remember); setSession(res); }} />} />
-        <Route path="/request-account" element={<RequestAccount />} />
+        {['/login', '/signup'].map((path) => (
+          <Route key={path} path={path} element={<LoginScreen key={path} api={api} appKind="client" otherAppUrl={ADMIN_URL} settings={settings} allowSignup initialMode={path === '/signup' ? 'signup' : 'login'}
+            onSession={(res, remember) => { setToken(res.token, remember); setSession(res); }} />} />
+        ))}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );

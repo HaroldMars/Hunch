@@ -26,13 +26,26 @@ export const THEMES = [
 ];
 export const themeCss = (k) => (THEMES.find((t) => t.key === k) || THEMES[0]).css;
 
-export const ROLES = ['developer', 'manager', 'tl', 'sme', 'agent'];
+// Hunch staff: the only accounts that can open the Admin Dashboard.
+export const STAFF_ROLES = ['developer', 'sysadmin', 'employee', 'support', 'operations'];
+export const isStaffRole = (role) => STAFF_ROLES.includes(role);
+// 'user' is everyone else: people who signed up themselves. manager/tl/sme/agent are retired (kept for old rows).
+export const ROLES = [...STAFF_ROLES, 'user'];
 export const ROLE_LABELS = {
   developer: 'Developer',
+  sysadmin: 'System Administrator',
+  employee: 'Hunch Employee',
+  support: 'Customer Support',
+  operations: 'Operations Staff',
+  user: 'Member',
   manager: 'Manager',
   tl: 'Team Leader',
   sme: 'SME',
   agent: 'Agent',
 };
+// Roles inside a Work team.
+export const TEAM_ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member' };
+// Picked during sign-up and shown on profiles.
+export const INTERESTS = ['Music', 'Gaming', 'Travel', 'Food', 'Fitness', 'Art', 'Photography', 'Movies', 'Books', 'Tech', 'Sports', 'Fashion', 'Business', 'Education', 'Nature', 'Pets'];
 export const NOTE_MAX_WORDS = 35;
 export const wordCount = (s) => (s || '').trim().split(/\s+/).filter(Boolean).length;

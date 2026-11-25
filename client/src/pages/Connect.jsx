@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import Icon from '@shared/Icon.jsx';
-import { ROLE_LABELS } from '@shared/constants.js';
 import { api } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, HeaderActions, Spinner, Empty, Confirm, timeAgo, useLoad } from '../components/ui.jsx';
@@ -53,7 +52,7 @@ function PersonRow({ u, relation, sub, onChange }) {
       <Avatar user={u} size={46} onClick={() => nav(`/u/${u.id}`)} />
       <div className="meta" onClick={() => nav(`/u/${u.id}`)} style={{ cursor: 'pointer' }}>
         <div className="title">{u.full_name}</div>
-        <div className="sub">{sub || u.job_title || ROLE_LABELS[u.role]}</div>
+        <div className="sub">{sub || u.job_title || (u.username ? `@${u.username}` : '')}</div>
       </div>
       <div style={{ display: 'flex', gap: 6 }}><FriendButton user={u} relation={relation} onChange={onChange} compact /></div>
     </div>

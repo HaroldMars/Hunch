@@ -6,7 +6,6 @@ import { api } from '../api.js';
 import { useAdmin, PageHead, Spinner, Empty, Avatar, ago, daysAgo, localDay, useLoad } from '../ui.jsx';
 import { RangeFilters, qs } from './Statistics.jsx';
 import { TotalsBars, Lines, MoodDistribution } from '../charts.jsx';
-import { TeamCompare } from './Teams.jsx';
 
 const Bar = ({ pct }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div className="bar" style={{ flex: 1 }}><i style={{ width: `${pct || 0}%` }} /></div><span className="small" style={{ width: 34, textAlign: 'right' }}>{pct ?? 0}%</span></div>
@@ -64,45 +63,58 @@ export function MoodLog({ fixedTeam }) {
   );
 }
 
+/** Reports: moderation (content reports, support requests) and the platform-wide mood log. */
 export default function Reports() {
-  const { user } = useAdmin();
-  const nav = useNavigate();
-  const [tab, setTab] = useState('teams');
-  const [f, setF] = useState({ from: daysAgo(29), to: localDay() });
-  const [list, setList] = useState(null);
-  useEffect(() => { setList(null); api(`/admin/reports/team-leaders?${qs(f)}`).then(setList); }, [f]);
-  const limited = ['tl', 'sme'].includes(user.role);
+  const [tab, setTab] = useState(new URLSearchParams(location.search).get('tab') || 'content');
   return (
     <>
-      <PageHead title="Reports" sub={limited ? 'Your team’s mood, attendance and performance' : 'Team leaders, their teams, moods and performance'} />
+      <PageHead title="Reports" sub="Content reports and support requests from Hunch users, plus the platform mood log" />
       <div className="tabs">
-        <button className={tab === 'teams' ? 'active' : ''} onClick={() => setTab('teams')}>Team leaders</button>
+        <button className={tab === 'content' ? 'active' : ''} onClick={() => setTab('content')}>Content reports</button>
+        <button className={tab === 'support' ? 'active' : ''} onClick={() => setTab('support')}>Support requests</button>
         <button className={tab === 'log' ? 'active' : ''} onClick={() => setTab('log')}>Mood log</button>
-        {!limited && <button className={tab === 'compare' ? 'active' : ''} onClick={() => setTab('compare')}>Team comparison</button>}
       </div>
-      {tab === 'compare' ? <><RangeFilters value={f} onChange={setF} showMood={false} /><TeamCompare range={f} /></> : tab === 'log' ? <MoodLog fixedTeam={limited ? (user.role === 'tl' ? user.id : user.team_leader_id) : null} /> : (
-        <>
-          <RangeFilters value={f} onChange={setF} showMood={false} />
-          {!list ? <Spinner /> : !list.length ? <Empty icon="users" title="No team leaders yet">Create Team Leader accounts in Registration, then assign agents and SMEs to them.</Empty> : (
-            <div className="card" style={{ padding: 0 }}>
-              <div className="table-wrap" style={{ margin: 0 }}><table>
-                <thead><tr><th>Team leader</th><th>Agents</th><th>SMEs</th><th>Participation</th><th>Attendance</th><th>Wellbeing</th><th>Dominant mood</th><th>Needs attention</th></tr></thead>
-                <tbody>{list.map((t) => (
-                  <tr key={t.id} className="click" onClick={() => nav(`/reports/${t.id}?from=${f.from}&to=${f.to}`)}>
-                    <td><div className="user-cell"><Avatar user={t} /><div><b>{t.full_name}</b><span>{t.user_code} · active {ago(t.last_active_at)}</span></div></div></td>
-                    <td>{t.summary.agents}</td><td>{t.summary.smes}</td>
-                    <td style={{ minWidth: 140 }}><Bar pct={t.summary.avgParticipation} /></td>
-                    <td style={{ minWidth: 140 }}><Bar pct={t.summary.avgAttendance} /></td>
-                    <td>{t.summary.wellbeing === null ? <span className="muted">-</span> : <span className={`tag ${t.summary.wellbeing >= 60 ? 'green' : t.summary.wellbeing >= 40 ? 'amber' : 'red'}`}>{t.summary.wellbeing}% positive</span>}</td>
-                    <td>{t.summary.dominantMood ? <span className="tag">{t.summary.dominantMood.emoji} {t.summary.dominantMood.label}</span> : <span className="muted">-</span>}</td>
-                    <td>{t.summary.atRisk.length ? <span className="tag red">{t.summary.atRisk.length} member{t.summary.atRisk.length > 1 ? 's' : ''}</span> : <span className="muted">None</span>}</td>
-                  </tr>
-                ))}</tbody>
-              </table></div>
+      {tab === 'log' ? <MoodLog fixedTeam={null} /> : <ReportQueue key={tab} kind={tab} />}
+    </>
+  );
+}
+
+const STATUS_TAG = { open: 'amber', resolved: 'green', dismissed: '' };
+function ReportQueue({ kind }) {
+  const { toast } = useAdmin();
+  const [status, setStatus] = useState('open');
+  const [rows, setRows] = useState(null);
+  const load = () => api(`/admin/content-reports?kind=${kind}&status=${status}`).then(setRows);
+  useEffect(() => { setRows(null); load(); }, [status]);
+  const set = async (r, next) => { await api(`/admin/content-reports/${r.id}`, { method: 'PATCH', body: { status: next } }); toast(next === 'open' ? 'Reopened' : `Marked ${next}`); load(); };
+  const remove = async (r) => { await api(`/admin/content-reports/${r.id}/remove`, { method: 'POST' }); toast('Content removed and report resolved', 'success'); load(); };
+  return (
+    <>
+      <div className="filters">
+        <label className="f"><span>Status</span><select className="select" value={status} onChange={(e) => setStatus(e.target.value)}><option value="open">Open</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option><option value="">All</option></select></label>
+      </div>
+      <div className="card">
+        {!rows ? <Spinner /> : !rows.length ? <Empty icon={kind === 'support' ? 'comment' : 'shield'} title={status === 'open' ? 'Nothing waiting' : 'No reports'}>{kind === 'support' ? 'Messages sent from Help & Support in the app appear here.' : 'Reports people file on posts, stories, comments, chats and accounts appear here.'}</Empty> : rows.map((r) => (
+          <div key={r.id} className="notif-row" style={{ alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="t">{kind === 'support' ? r.subject || 'Support request' : <>{r.target?.sub || r.target_type} report</>} <span className={`tag ${STATUS_TAG[r.status] ?? ''}`}>{r.status}</span></div>
+              {r.target && <div className="b small" style={{ marginTop: 2 }}>{r.target.user && <b>{r.target.user.full_name}: </b>}“{r.target.label}”</div>}
+              {kind !== 'support' && !r.target && <div className="b small muted">The reported {r.target_type} no longer exists.</div>}
+              <div className="b small" style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{kind === 'support' ? r.reason : <><span className="muted">Reason:</span> {r.reason}</>}</div>
+              <div className="m">{r.reporter ? `${r.reporter.full_name} (${r.reporter.email})` : 'Deleted account'} · {ago(r.created_at)}</div>
             </div>
-          )}
-        </>
-      )}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {r.status === 'open' ? (
+                <>
+                  {r.target?.removable && <button className="btn sm danger" onClick={() => remove(r)}><Icon name="trash" size={14} /> Remove</button>}
+                  <button className="btn sm" onClick={() => set(r, 'resolved')}>Resolve</button>
+                  {kind !== 'support' && <button className="btn ghost sm" onClick={() => set(r, 'dismissed')}>Dismiss</button>}
+                </>
+              ) : <button className="btn ghost sm" onClick={() => set(r, 'open')}>Reopen</button>}
+            </div>
+          </div>
+        ))}
+      </div>
     </>
   );
 }

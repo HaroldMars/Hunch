@@ -2,6 +2,7 @@ import { get, run } from './db.js';
 import { notify } from './notify.js';
 import { nowIso } from './util.js';
 import { sendComposed } from './mailer.js';
+import { isStaffRole } from '../../shared/constants.js';
 
 /**
  * Deliver a composed email through the built-in mail system.
@@ -31,7 +32,7 @@ export function deliverEmail(id) {
     ).lastInsertRowid);
     // Staff get a dashboard notification; agents get it in the app.
     notify({
-      userId: u.id, audience: u.role === 'agent' ? 'client' : 'admin', type: 'email', actorId: e.from_id,
+      userId: u.id, audience: isStaffRole(u.role) ? 'admin' : 'client', type: 'email', actorId: e.from_id,
       entityType: 'email', entityId: copy, title: `New email from ${sender?.full_name || e.from_email}`, body: e.subject,
     });
   }

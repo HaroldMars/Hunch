@@ -17,7 +17,7 @@ export function RangeFilters({ value, onChange, teams, showMood = true, children
       </div>
       <label className="f"><span>From</span><input className="input" type="date" value={value.from} max={value.to} onChange={set('from')} /></label>
       <label className="f"><span>To</span><input className="input" type="date" value={value.to} min={value.from} max={localDay()} onChange={set('to')} /></label>
-      {teams && (
+      {teams?.length > 0 && (
         <label className="f"><span>Team leader</span>
           <select className="select" value={value.teamLeaderId || ''} onChange={set('teamLeaderId')}>
             <option value="">All teams</option>
@@ -72,7 +72,7 @@ export default function Statistics() {
   const periodData = period === 'daily' ? data.daily : period === 'weekly' ? data.weekly : data.monthly;
   return (
     <>
-      <PageHead title="Statistics" sub={`${scoped ? 'Your team' : f.teamLeaderId ? 'Selected team' : 'Organisation-wide'} · ${data.range.from} → ${data.range.to}`}>
+      <PageHead title="Statistics" sub={`${scoped ? 'Your team' : f.teamLeaderId ? 'Selected team' : 'Platform-wide'} · ${data.range.from} → ${data.range.to}`}>
         <span className="small muted"><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, background: 'var(--success)', marginRight: 6 }} />Live · updated {updated?.toLocaleTimeString()}</span>
         <button className="btn ghost sm" onClick={load}><Icon name="refresh" size={15} /> Refresh</button>
       </PageHead>

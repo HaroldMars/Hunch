@@ -2,10 +2,10 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { get, all, run, getSetting } from '../db.js';
-import { auth, signToken, modulesFor, creatableRoles } from '../auth.js';
+import { get, all, run, tx, getSetting, codeFor } from '../db.js';
+import { auth, signToken, modulesFor, creatableRoles, isStaff } from '../auth.js';
 import { h, fail, nowIso, validatePassword, selfUser, imageUpload, fileUrl, deleteStoredFiles, localDay, addDays } from '../util.js';
-import { MOODS } from '../../../shared/constants.js';
+import { MOODS, INTERESTS } from '../../../shared/constants.js';
 import { notifyStaff } from '../notify.js';
 import { sendVerificationCode } from '../mailer.js';
 
@@ -39,15 +39,18 @@ export const sessionPayload = (user, app) => ({
   creatableRoles: creatableRoles(user),
   // First login: verify email → create a new password → complete profile.
   next: nextStep(user),
+  // The onboarding steps this account goes through: staff-created accounts get all three,
+  // email sign-ups verify their email, Google sign-ups only complete their profile.
+  steps: user.signup_method === 'google' ? ['complete-profile'] : user.signup_method === 'email' ? ['verify', 'complete-profile'] : ['verify', 'change-password', 'complete-profile'],
 });
 
-// Destination: the app you signed in to. Every role uses the Hunch app; the dashboard is staff-only,
-// so an agent signing in there is sent to the Hunch app. ('auto' = old clients: agents → app, staff → dashboard.)
-const resolveApp = (requested, user) => (requested === 'client' || requested === 'admin' ? requested : user.role === 'agent' ? 'client' : 'admin');
+// Destination: the app you signed in to. The Admin Dashboard is for Hunch staff only, so anyone else
+// signing in there is sent to the Hunch app. ('auto' = old clients: staff → dashboard, everyone else → app.)
+const resolveApp = (requested, user) => (requested === 'client' || requested === 'admin' ? requested : isStaff(user) ? 'admin' : 'client');
 
 function completeLogin(res, user, app, remember) {
   if (user.status !== 'active') fail(403, 'This account has been deactivated. Contact your administrator.');
-  if (app === 'admin' && user.role === 'agent') app = 'client';
+  if (app === 'admin' && !isStaff(user)) app = 'client';
   run('UPDATE users SET last_login_at = ?, last_active_at = ? WHERE id = ?', nowIso(), nowIso(), user.id);
   run('INSERT INTO login_logs (user_id, app) VALUES (?, ?)', user.id, app);
   res.json({ token: signToken(user, app, remember), ...sessionPayload(user, app) });
@@ -68,22 +71,79 @@ r.post('/login', h((req, res) => {
   completeLogin(res, user, resolveApp(app, user), !!remember);
 }));
 
-// Google sign-in (optional). Requires GOOGLE_CLIENT_ID; only matches accounts an admin already created.
+// ---------- self sign-up ----------
+const USERNAME = /^[a-z0-9._]{3,30}$/i;
+const checkUsername = (name, exceptId = 0) => {
+  const u = String(name || '').trim().replace(/^@/, '');
+  if (!USERNAME.test(u)) fail(400, 'Usernames are 3–30 characters: letters, numbers, dots and underscores.');
+  if (get('SELECT id FROM users WHERE username = ? AND id != ?', u, exceptId)) fail(409, 'That username is taken. Try another.');
+  return u;
+};
+/** A free username based on a name or email, for Google sign-ups (they can change it in the next step). */
+function suggestUsername(seed) {
+  const base = (String(seed || 'hunch').toLowerCase().replace(/[^a-z0-9._]/g, '').replace(/^[._]+|[._]+$/g, '') || 'hunch').slice(0, 24).padEnd(3, '0');
+  for (let i = 0; i < 50; i++) {
+    const name = i ? `${base}${crypto.randomInt(10, 9999)}` : base;
+    if (!get('SELECT id FROM users WHERE username = ?', name)) return name;
+  }
+  return `user${Date.now().toString(36)}`;
+}
+function createMember({ full_name, email, username, password, method, avatar = null, verified = 0 }) {
+  return tx(() => {
+    const id = Number(run(
+      `INSERT INTO users (username, email, password_hash, full_name, role, avatar, must_change_password, verified, profile_completed, signup_method, job_title)
+       VALUES (?, ?, ?, ?, 'user', ?, 0, ?, 0, ?, '')`,
+      username, email, bcrypt.hashSync(password, 10), full_name, avatar, verified, method
+    ).lastInsertRowid);
+    run('UPDATE users SET user_code = ? WHERE id = ?', codeFor(id), id);
+    return get('SELECT * FROM users WHERE id = ?', id);
+  });
+}
+
+// Anyone can create a Hunch account. They verify their email, then complete their profile.
+r.post('/signup', h((req, res) => {
+  const { full_name = '', email = '', username = '', password = '', remember = true } = req.body || {};
+  const name = String(full_name).trim().slice(0, 80);
+  const mail = String(email).trim().toLowerCase();
+  if (!name) fail(400, 'Enter your name.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) fail(400, 'Enter a valid email address.');
+  const uname = checkUsername(username);
+  const err = validatePassword(password);
+  if (err) fail(400, err);
+  if (get('SELECT id FROM users WHERE email = ?', mail)) fail(409, 'An account with this email already exists. Sign in instead.');
+  const user = createMember({ full_name: name, email: mail, username: uname, password, method: 'email' });
+  completeLogin(res, user, 'client', !!remember);
+}));
+
+// Continue with Google: signs in an existing account, or creates one for a new person (Hunch app only).
+// Name, email and profile photo come from Google; username, bio and interests are asked next.
 r.post('/google', h(async (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) fail(501, 'Google sign-in is not configured on this server.');
   const { credential = '', app = 'auto', remember = false } = req.body || {};
   const g = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`).then((x) => x.json()).catch(() => null);
   if (!g || g.aud !== clientId || g.email_verified !== 'true') fail(401, 'Google sign-in failed. Try again.');
-  const user = get('SELECT * FROM users WHERE email = ?', g.email);
-  if (!user) fail(403, 'No Hunch account uses this Google email. Contact your administrator.');
+  const email = String(g.email).toLowerCase();
+  let user = get('SELECT * FROM users WHERE email = ?', email);
+  if (!user) {
+    if (app === 'admin') fail(403, 'No Hunch staff account uses this Google email.');
+    const avatar = /^https:\/\/[\w.-]+\.googleusercontent\.com\//.test(g.picture || '') ? g.picture : null;
+    user = createMember({
+      full_name: String(g.name || email.split('@')[0]).slice(0, 80), email, username: suggestUsername(email.split('@')[0]),
+      password: crypto.randomBytes(24).toString('hex'), method: 'google', avatar, verified: 1,
+    });
+  } else if (!user.verified) {
+    // Google has confirmed this email address.
+    run('UPDATE users SET verified = 1, verify_code = NULL WHERE id = ?', user.id);
+    user = get('SELECT * FROM users WHERE id = ?', user.id);
+  }
   completeLogin(res, user, resolveApp(app, user), !!remember);
 }));
 
 // Hand a signed-in user over to the other app (e.g. a TL opening the social app).
 r.post('/handoff', auth(), h((req, res) => {
   const app = req.body?.app === 'admin' ? 'admin' : 'client';
-  if (app === 'admin' && req.user.role === 'agent') fail(403, 'No admin access.');
+  if (app === 'admin' && !isStaff(req.user)) fail(403, 'No admin access.');
   res.json({ token: signToken(req.user, app, false), app });
 }));
 
@@ -157,10 +217,19 @@ r.post('/account-request', h((req, res) => {
   res.json({ ok: true });
 }));
 
+// Live username check for the sign-up and profile forms.
+r.get('/username-available', h((req, res) => {
+  const u = String(req.query.u || '').trim().replace(/^@/, '');
+  if (!USERNAME.test(u)) return res.json({ ok: false, reason: '3–30 letters, numbers, dots or underscores' });
+  const taken = get('SELECT id FROM users WHERE username = ?', u);
+  res.json({ ok: !taken, reason: taken ? 'Taken' : null });
+}));
+
 r.get('/public-settings', h((_req, res) => {
   res.json({
     app_name: getSetting('app_name'),
     allow_account_requests: getSetting('allow_account_requests') === '1',
+    allow_signup: true,
     maintenance_banner: getSetting('maintenance_banner'),
     note_max_words: Number(getSetting('note_max_words')),
     google_client_id: process.env.GOOGLE_CLIENT_ID || null,
@@ -168,16 +237,26 @@ r.get('/public-settings', h((_req, res) => {
   });
 }));
 
-// Final onboarding step: confirm name and fill in profile basics (photo optional).
+/** Interests: a JSON array or comma list, limited to the known options. */
+export const readInterests = (v) => {
+  let list = v;
+  if (typeof v === 'string') { try { list = JSON.parse(v); } catch { list = v.split(','); } }
+  return [...new Set([].concat(list || []).map((x) => String(x).trim()).filter((x) => INTERESTS.includes(x)))].slice(0, 10);
+};
+
+// Final onboarding step: name, username, bio and interests (photo optional).
 r.post('/complete-profile', auth({ ready: false }), imageUpload.single('avatar'), h((req, res) => {
   const u = req.user;
   if (!u.verified || u.must_change_password) fail(400, 'Finish the earlier steps first.');
   const b = req.body || {};
   const full_name = String(b.full_name ?? u.full_name).trim().slice(0, 80);
   if (!full_name) fail(400, 'Your name is required.');
-  run('UPDATE users SET full_name = ?, job_title = ?, bio = ?, location = ?, avatar = COALESCE(?, avatar), profile_completed = 1 WHERE id = ?',
-    full_name, String(b.job_title ?? u.job_title).slice(0, 80), String(b.bio ?? u.bio).slice(0, 300), String(b.location ?? u.location).slice(0, 80),
-    fileUrl(req.file), u.id);
+  const username = b.username !== undefined ? checkUsername(b.username, u.id) : u.username;
+  if (!username && !isStaff(u)) fail(400, 'Choose a username.');
+  const interests = b.interests !== undefined ? JSON.stringify(readInterests(b.interests)) : u.interests;
+  run('UPDATE users SET full_name = ?, username = ?, job_title = ?, bio = ?, location = ?, interests = ?, avatar = COALESCE(?, avatar), profile_completed = 1 WHERE id = ?',
+    full_name, username, String(b.job_title ?? u.job_title).slice(0, 80), String(b.bio ?? u.bio).slice(0, 300), String(b.location ?? u.location).slice(0, 80),
+    interests, fileUrl(req.file), u.id);
   if (req.file) deleteStoredFiles(u.avatar);
   res.json(sessionPayload(get('SELECT * FROM users WHERE id = ?', u.id), req.app_kind));
 }));

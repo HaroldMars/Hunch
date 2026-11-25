@@ -5,7 +5,7 @@ import { auth } from '../auth.js';
 import { h, fail, imageUpload, fileUrl, deleteStoredFiles, publicUser, friendIds, areFriends, nowIso, hoursFromNow, localDay, blockedIds, canViewProfile, isBlocked } from '../util.js';
 import { postMessage } from './chats.js';
 import { notify } from '../notify.js';
-import { teamOf, teamMemberIds, teamName, canAccessTeam } from '../teams.js';
+import { teammateIds, teamName, canAccessTeam, resolveTeam } from '../teams.js';
 
 const r = Router();
 r.use(auth());
@@ -19,14 +19,13 @@ export const logMood = (userId, mood, source) => run('INSERT INTO mood_logs (use
 export const AUDIENCES = ['public', 'friends', 'team', 'private'];
 export const EFFECTS = ['warm', 'cool', 'mono', 'vivid', 'fade', 'dream'];
 export const NOTE_CATEGORIES = ['thought', 'mood', 'question', 'quote', 'update', 'achievement'];
-const viewerTeam = (uid) => teamOf(get('SELECT id, role, team_leader_id FROM users WHERE id = ?', uid));
 export function canSeeStory(s, me) {
   if (s.user_id === me) return true;
   if (isBlocked(me, s.user_id)) return false;
   switch (s.audience) {
     case 'private': return false;
-    // Team members, plus the team's supervising manager (who sees team stories in the Work feed).
-    case 'team': return !!s.team_id && (viewerTeam(me) === s.team_id || canAccessTeam(get('SELECT id, role, team_leader_id FROM users WHERE id = ?', me), s.team_id));
+    // Members of the team the story was shared with.
+    case 'team': return !!s.team_id && canAccessTeam(me, s.team_id);
     case 'public': return true;
     default: return areFriends(me, s.user_id);
   }
@@ -56,8 +55,7 @@ export const storyOut = (s, viewerId) => ({
 r.get('/stories', h((req, res) => {
   const me = req.user.id;
   const hidden = new Set(blockedIds(me));
-  const t = viewerTeam(me);
-  const ids = [...new Set([me, ...friendIds(me), ...(t ? teamMemberIds(t) : [])])].filter((id) => !hidden.has(id));
+  const ids = [...new Set([me, ...friendIds(me), ...teammateIds(me)])].filter((id) => !hidden.has(id));
   const ph = ids.map(() => '?').join(',');
   const rows = all(`SELECT * FROM stories WHERE user_id IN (${ph}) AND expires_at > ? ORDER BY id`, ...ids, nowIso()).filter((x) => canSeeStory(x, me));
   const byUser = new Map();
@@ -112,7 +110,7 @@ r.post('/stories', imageUpload.single('image'), h((req, res) => {
   const theme = THEME_KEYS.includes(b.theme) ? b.theme : 'midnight';
   if (mood && !MOOD_KEYS.includes(mood)) fail(400, 'Unknown mood.');
   const audience = AUDIENCES.includes(b.audience) ? b.audience : 'friends';
-  const teamId = audience === 'team' ? teamOf(req.user) : null;
+  const teamId = audience === 'team' ? resolveTeam(req.user, b.team_id) : null;
   if (audience === 'team' && !teamId) fail(400, 'You are not on a team yet, so you can’t post a Team-only story.');
   const stickers = readStickers(b.stickers, audience, req.user.id);
   if (!text && !req.file && !mood && !stickers.length) fail(400, 'Add a photo, text or a mood.');

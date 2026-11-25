@@ -49,7 +49,7 @@ export function notificationById(id) {
 }
 
 // Notify staff members (admin dashboard audience). `roles` limits recipients.
-export function notifyStaff({ roles = ['developer', 'manager'], ...rest }) {
+export function notifyStaff({ roles = ['developer', 'sysadmin', 'support'], ...rest }) {
   const ph = roles.map(() => '?').join(',');
   const staff = all(`SELECT id FROM users WHERE status = 'active' AND role IN (${ph})`, ...roles);
   staff.forEach((s) => notify({ ...rest, userId: s.id, audience: 'admin' }));

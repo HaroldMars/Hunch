@@ -37,7 +37,7 @@ function Announce({ onClose, onDone }) {
       </select>
       <label className="label">Audience</label>
       <select className="select input" value={f.audience} onChange={(e) => setF({ ...f, audience: e.target.value })}>
-        <option value="everyone">Everyone</option><option value="staff">Staff only (TL, SME, managers, developers)</option><option value="agents">Agents only</option>
+        <option value="everyone">Everyone</option><option value="users">Hunch users only</option><option value="staff">Hunch staff only</option>
       </select>
       <label className="label">Title</label><input className="input" value={f.title} maxLength={120} onChange={(e) => setF({ ...f, title: e.target.value })} />
       <label className="label">Message</label><textarea className="input" rows={6} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />
@@ -58,14 +58,13 @@ export default function Notifications() {
   const load = () => api('/notifications').then(setList);
   useEffect(() => { load(); }, []);
   useEffect(() => onNotification((n) => setList((l) => (l ? [n, ...l] : l))), []);
-  const canAnnounce = ['developer', 'manager'].includes(user.role);
+  const canAnnounce = ['developer', 'sysadmin', 'employee', 'operations'].includes(user.role);
 
   const open = (n) => {
     if (!n.is_read) { api(`/notifications/${n.id}/read`, { method: 'POST' }).then(refreshCounts); setList((l) => l.map((x) => (x.id === n.id ? { ...x, is_read: 1 } : x))); }
     if (n.type === 'account_request') nav('/register');
     else if (n.type === 'password_reset') nav('/users?tab=resets');
     else if (n.type === 'email') nav('/email');
-    else if (n.type === 'post_permission') nav('/workspace');
     else setDetail(n);
   };
   const shown = (list || []).filter((n) => tab === 'all' || (STYLE[n.type]?.group || 'system') === tab);

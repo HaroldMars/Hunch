@@ -6,9 +6,8 @@ import { notify } from '../notify.js';
 import { postMessage } from './chats.js';
 import { canAccessTeam, canManageTeam } from '../teams.js';
 
-const viewerRow = (id) => get('SELECT id, role, team_leader_id FROM users WHERE id = ?', id);
-// Work posts are visible to their team (and overseers); social posts follow profile privacy.
-const canSeePost = (p, viewerId, author) => (p.team_id ? canAccessTeam(viewerRow(viewerId), p.team_id) : canViewProfile(viewerId, author));
+// Work posts are visible to their team's members only; social posts follow profile privacy.
+const canSeePost = (p, viewerId, author) => (p.team_id ? canAccessTeam(viewerId, p.team_id) : canViewProfile(viewerId, author));
 
 const r = Router();
 r.use(auth());

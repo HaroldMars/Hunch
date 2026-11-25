@@ -34,8 +34,10 @@ const saveRecent = (p) => { try { localStorage.setItem(RECENT_PLACES, JSON.strin
 
 export default function StoryComposer({ onClose, onCreated }) {
   const { user, toast } = useApp();
-  const ctx = useLoad(() => api('/work/context').catch(() => ({ team: null })), []);
-  const team = ctx.data?.team && !ctx.data.overseer ? ctx.data.team : null;
+  // Team stories go to the team you last opened in Work (only while Work Mode is on).
+  const lastTeam = (() => { try { return localStorage.getItem('hunch_work_team') || ''; } catch { return ''; } })();
+  const ctx = useLoad(() => (user.work_mode ? api(`/work/context${lastTeam ? `?team=${lastTeam}` : ''}`).catch(() => ({ team: null })) : Promise.resolve({ team: null })), []);
+  const team = ctx.data?.team || null;
   const musicOn = useLoad(() => api('/music/status').catch(() => ({ enabled: false })), []).data?.enabled;
   const [step, setStep] = useState('camera'); // camera | edit | compose
   const [file, setFile] = useState(null);
@@ -83,6 +85,7 @@ export default function StoryComposer({ onClose, onCreated }) {
         allow_replies: opts.allow_replies ? '1' : '0', allow_reactions: opts.allow_reactions ? '1' : '0', allow_comments: opts.allow_comments ? '1' : '0',
         show_on_map: opts.show_on_map && audience !== 'private' ? '1' : '0', archive: opts.archive || audience === 'private' ? '1' : '0',
         duration_hours: String(opts.duration_hours), ...(music ? { music: JSON.stringify(music) } : {}),
+        ...(audience === 'team' && team ? { team_id: String(team.id) } : {}),
         ...(place ? { place_name: place.name, lat: String(place.lat), lng: String(place.lng) } : {}),
       };
       const s = await api('/stories', { method: 'POST', form: toForm(fields) });

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
 import Logo from '@shared/Logo.jsx';
-import { ROLE_LABELS } from '@shared/constants.js';
+import { ROLE_LABELS, isStaffRole } from '@shared/constants.js';
 import { api } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, TopBar, Sheet, Confirm, Spinner, Empty, useLoad } from '../components/ui.jsx';
@@ -10,6 +10,7 @@ import { Avatar, TopBar, Sheet, Confirm, Spinner, Empty, useLoad } from '../comp
 const SECTIONS = [
   { key: 'account', icon: 'user', label: 'Account', sub: 'Profile, password, email, privacy' },
   { key: 'privacy', icon: 'lock', label: 'Privacy', sub: 'Posts, messages, requests, blocked, active status' },
+  { key: 'work', icon: 'briefcase', label: 'Work Mode', sub: 'Private teams, team chats and the Work feed' },
   { key: 'notifications', icon: 'bell', label: 'Notifications', sub: 'Likes, comments, messages, requests, updates' },
   { key: 'appearance', icon: 'moon', label: 'Appearance', sub: 'Light, dark or system default' },
   { key: 'data', icon: 'download', label: 'Data & Storage', sub: 'Media downloads, cache, storage usage' },
@@ -60,6 +61,7 @@ export default function Settings() {
       {!meta && <Home />}
       {section === 'account' && <Account />}
       {section === 'privacy' && <Privacy />}
+      {section === 'work' && <WorkMode />}
       {section === 'notifications' && <Notifications />}
       {section === 'appearance' && <Appearance />}
       {section === 'data' && <DataStorage />}
@@ -77,14 +79,57 @@ function Home() {
     <>
       <button className="settings-me" onClick={() => nav(`/u/${user.id}`)}>
         <Avatar user={user} size={52} />
-        <span><b>{user.full_name}</b><small>{user.email} · {ROLE_LABELS[user.role]}</small></span>
+        <span><b>{user.full_name}</b><small>{user.email}{isStaffRole(user.role) ? ` · ${ROLE_LABELS[user.role]}` : ''}</small></span>
         <Icon name="next" size={17} />
       </button>
       <Group>
-        {SECTIONS.map((s) => <Row key={s.key} icon={s.icon} label={s.label} sub={s.sub} onClick={() => nav(`/settings/${s.key}`)} />)}
+        {SECTIONS.map((s) => <Row key={s.key} icon={s.icon} label={s.label} sub={s.key === 'work' ? (user.work_mode ? 'On' : 'Off') : s.sub} onClick={() => nav(`/settings/${s.key}`)} />)}
       </Group>
       <Group><Row icon="logout" label="Sign out" danger right={<span />} onClick={() => setConfirm(true)} /></Group>
       {confirm && <Confirm title="Sign out of Hunch?" confirmLabel="Sign out" onClose={() => setConfirm(false)} onConfirm={logout} message="You can sign back in any time with your email and password." />}
+    </>
+  );
+}
+
+/** Work Mode: off = a regular social app. On = adds the Work tab, team chats and private teams. */
+function WorkMode() {
+  const { user, session, setSession, toast } = useApp();
+  const nav = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const on = !!user.work_mode;
+  const set = async (next) => {
+    setBusy(true);
+    try {
+      const r = await api('/work/mode', { method: 'PATCH', body: { on: next } });
+      setSession({ ...session, user: r.user });
+      toast(next ? 'Work Mode is on' : 'Work Mode is off', 'success');
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <div className={`wm-hero ${on ? 'on' : ''}`}>
+        <div className="wm-icon"><Icon name="briefcase" size={26} /></div>
+        <div className="wm-text">
+          <b>Work Mode</b>
+          <small>{on ? 'On: your Timeline has a Work tab and Chats has Teams.' : 'Off: Hunch works like a regular social app.'}</small>
+        </div>
+        <input type="checkbox" className="switch" checked={on} disabled={busy} onChange={(e) => set(e.target.checked)} aria-label="Work Mode" />
+      </div>
+      <Group title={on ? 'Turned on' : 'When you turn it on'}>
+        <div className="wm-list">
+          <div><Icon name="home" size={19} /><span><b>Work tab</b><small>Timeline gets For You, Friends and Work: your team feed, schedules and team stories.</small></span></div>
+          <div><Icon name="users" size={19} /><span><b>Teams</b><small>Create a team, invite friends by username or email, join with an invite code, or leave any time.</small></span></div>
+          <div><Icon name="chat" size={19} /><span><b>Team chats</b><small>Chats splits into Personal and Teams. Team channels stay separate from social messages.</small></span></div>
+        </div>
+      </Group>
+      <Group title="Privacy">
+        <div className="wm-list">
+          <div><Icon name="lock" size={19} /><span><b>Teams are always private</b><small>Your teams, work feed, team chats, members and projects never appear on your public profile. Only you can see your work data.</small></span></div>
+          <div><Icon name="globe" size={19} /><span><b>Your social profile stays the same</b><small>Switching Work Mode on or off doesn’t change your posts, stories, friends or highlights.</small></span></div>
+        </div>
+      </Group>
+      {on && <Group><Row icon="briefcase" label="Open Work" sub="Your teams, invitations and team feed" onClick={() => nav('/?tab=work')} /></Group>}
+      {!on && <p className="small muted" style={{ padding: '0 4px' }}>Turning Work Mode off only hides it. Your teams and team chats are kept for when you turn it back on.</p>}
     </>
   );
 }
