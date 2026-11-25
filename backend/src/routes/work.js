@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { MOODS, moodByKey } from '../../../shared/constants.js';
-import { get, all, run, tx, newInviteCode } from '../db.js';
+import { MOODS, moodByKey, TEAM_ROLES, TEAM_ROLE_LABELS } from '../../../shared/constants.js';
+import { get, all, run, tx, newInviteCode, ensureTeamChannels, channelRoleFor } from '../db.js';
 import { auth } from '../auth.js';
 import { h, fail, imageUpload, fileUrl, publicUser, selfUser, nowIso, localDay, addDays, deleteStoredFiles, areFriends } from '../util.js';
 import { notify } from '../notify.js';
@@ -9,8 +9,10 @@ import { emitToUsers } from '../realtime.js';
 import { hydratePosts, hydratePost } from './posts.js';
 import { storyOut } from './stories.js';
 import { POSITIVE, LOW_ENERGY, NEGATIVE } from '../analytics.js';
+import { postMessage } from './chats.js';
 import {
   workTeams, memberRole, canAccessTeam, canManageTeam, isTeamOwner, canInvite, canPostInTeam, teamSettings, teamMemberIds, resolveTeam, teamRow,
+  canAssignRoles, canEditSettings, canSeeAnalytics, canSchedule, canMonitor, canAnnounce, ROLE_RANK,
 } from '../teams.js';
 
 const r = Router();
@@ -21,7 +23,9 @@ const KIND_LABEL = { shift: 'Shift', rest: 'Rest day', lunch: 'Lunch', meeting: 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const ROLE_ORDER = ['owner', 'admin', 'member'];
+const readRole = (v, fallback) => (v === 'member' ? 'agent' : TEAM_ROLES.includes(v) ? v : fallback);
+const roleLabel = (r) => TEAM_ROLE_LABELS[r] || r;
+const anRole = (r) => (r === 'sme' ? 'an SME' : r === 'agent' ? 'an Agent' : `a ${roleLabel(r)}`);
 
 /** The team this request is about; the user must be a member. */
 function team(req, source = req.query) {
@@ -29,7 +33,7 @@ function team(req, source = req.query) {
   if (!t) fail(404, source?.team ? 'You are not a member of that team.' : 'You are not on a team yet. Create one or accept an invitation.');
   return t;
 }
-const mustManage = (req, t) => { if (!canManageTeam(req.user, t)) fail(403, 'Only team owners and admins can do that.'); };
+const mustManage = (req, t) => { if (!canManageTeam(req.user, t)) fail(403, 'Only managers and team leaders can do that.'); };
 const mustOwn = (req, t) => { if (!isTeamOwner(req.user, t)) fail(403, 'Only the team owner can do that.'); };
 const activeTeamOr404 = (id) => {
   const t = get("SELECT * FROM teams WHERE id = ? AND status = 'active'", Number(id));
@@ -44,32 +48,45 @@ function teamOut(t, me) {
   return {
     id: row.id, name: row.name, description: row.description, logo: row.logo, color: row.color,
     members: teamMemberIds(row.id).length, owner: row.owner_id ? publicUser(row.owner_id) : null,
-    my_role: memberRole(me, row.id), created_at: row.created_at,
+    my_role: memberRole(me, row.id), is_owner: row.owner_id === me?.id, created_at: row.created_at,
     invite_code: canInvite(me, row.id) ? row.invite_code : undefined,
   };
 }
 const fanout = (teamId, exceptId, payload) => teamMemberIds(teamId).filter((id) => id !== exceptId).forEach((uid) => notify({ ...payload, userId: uid }));
-const managerIds = (teamId) => all("SELECT user_id FROM team_members WHERE team_id = ? AND role IN ('owner','admin')", teamId).map((m) => m.user_id);
+const managerIds = (teamId) => all("SELECT m.user_id FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.team_id = ? AND (m.role IN ('manager','tl') OR m.user_id = t.owner_id)", teamId).map((m) => m.user_id);
 
 // ---------- team channels (group chats that belong to a team) ----------
-// Every member is in every channel; owners and admins are channel admins.
+// Every member is in every channel; managers, team leaders and the owner are channel admins.
 const channelIds = (teamId) => all('SELECT id FROM conversations WHERE team_id = ?', teamId).map((c) => c.id);
-const convRole = (teamRole) => (teamRole === 'member' ? 'member' : 'admin');
 function syncChannels(teamId, userId, teamRoleOrNull) {
+  const owner = teamRow(teamId)?.owner_id === userId;
   for (const cid of channelIds(teamId)) {
     if (!teamRoleOrNull) run('DELETE FROM conversation_members WHERE conversation_id = ? AND user_id = ?', cid, userId);
     else run(`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)
-             ON CONFLICT(conversation_id, user_id) DO UPDATE SET role = excluded.role`, cid, userId, convRole(teamRoleOrNull));
+             ON CONFLICT(conversation_id, user_id) DO UPDATE SET role = excluded.role`, cid, userId, channelRoleFor(teamRoleOrNull, owner));
     emitToUsers([userId], 'conversation:update', { id: cid });
   }
 }
 function createChannel(teamId, name, by) {
+  const owner = teamRow(teamId)?.owner_id;
   const cid = Number(run("INSERT INTO conversations (type, name, created_by, team_id) VALUES ('group', ?, ?, ?)", name, by, teamId).lastInsertRowid);
   all('SELECT user_id, role FROM team_members WHERE team_id = ?', teamId)
-    .forEach((m) => run('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)', cid, m.user_id, convRole(m.role)));
+    .forEach((m) => run('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)', cid, m.user_id, channelRoleFor(m.role, m.user_id === owner)));
   return cid;
 }
-function addMember(teamId, userId, role = 'member') {
+/** Post an automatic update into one of the team's standard channels (schedules, announcements, meetings, projects). */
+function channelUpdate(teamId, key, actor, text) {
+  const c = get('SELECT id FROM conversations WHERE team_id = ? AND team_channel = ?', teamId, key);
+  if (!c) return;
+  try { postMessage({ conversationId: c.id, sender: actor, text, kind: 'system' }); } catch { /* a channel post never blocks the action itself */ }
+}
+const dayLabel = (d) => new Date(`${d}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const clock = (t) => {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};
+function addMember(teamId, userId, role = 'agent') {
   run('INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT(team_id, user_id) DO NOTHING', teamId, userId, role);
   run('UPDATE users SET work_mode = 1 WHERE id = ?', userId);
   syncChannels(teamId, userId, memberRole(userId, teamId));
@@ -98,11 +115,16 @@ r.get('/work/context', h((req, res) => {
     teams,
     invites,
     role: memberRole(req.user, t),
-    canManage: canManageTeam(req.user, t),
     isOwner: isTeamOwner(req.user, t),
+    canManage: canManageTeam(req.user, t),
+    canAssign: canAssignRoles(req.user, t),
+    canEditSettings: canEditSettings(req.user, t),
+    canSchedule: canSchedule(req.user, t),
+    canMonitor: canMonitor(req.user, t),
+    canAnnounce: canAnnounce(req.user, t),
+    canAnalytics: canSeeAnalytics(req.user, t),
     canPost: canPostInTeam(req.user, t),
     canInvite: canInvite(req.user, t),
-    canSeeMood: canManageTeam(req.user, t),
     settings: { members_can_post: !!s.members_can_post, members_can_invite: !!teamRow(t).members_can_invite },
   });
 }));
@@ -118,24 +140,26 @@ r.post('/work/teams', imageUpload.single('logo'), h((req, res) => {
   const b = req.body || {};
   const { name, description = '' } = readTeamFields(b);
   if (!name) fail(400, 'Give your team a name.');
-  const owned = get("SELECT COUNT(*) c FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = ? AND m.role = 'owner' AND t.status = 'active'", req.user.id).c;
+  const owned = get("SELECT COUNT(*) c FROM teams WHERE owner_id = ? AND status = 'active'", req.user.id).c;
   if (owned >= 20) fail(400, 'You can own up to 20 teams.');
+  // The creator picks their own role: Manager, Team Leader, SME or Member (Agent).
+  const myRole = readRole(b.my_role, 'manager');
   const id = tx(() => {
     const id = Number(run('INSERT INTO teams (name, description, logo, owner_id, created_by, invite_code, members_can_invite, department) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       name, description, fileUrl(req.file), req.user.id, req.user.id, newInviteCode(), flag(b.members_can_invite) ?? 0, '').lastInsertRowid);
-    run('INSERT INTO team_settings (team_id, members_can_post) VALUES (?, ?)', id, flag(b.members_can_post) ?? 1);
-    run("INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')", id, req.user.id);
-    createChannel(id, 'general', req.user.id);
+    run('INSERT INTO team_settings (team_id, members_can_post) VALUES (?, ?)', id, flag(b.members_can_post) ?? 0);
+    run('INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)', id, req.user.id, myRole);
+    ensureTeamChannels(id);
     run('UPDATE users SET work_mode = 1 WHERE id = ?', req.user.id);
     return id;
   });
   res.status(201).json(teamOut(id, req.user));
 }));
 
-// Owner: name, description, logo. Owner or admin: team settings.
+// Owner: name, description, logo. Managers (and the owner): team settings.
 r.patch('/work/teams/:id', imageUpload.single('logo'), h((req, res) => {
   const t = activeTeamOr404(req.params.id);
-  mustManage(req, t.id);
+  if (!canEditSettings(req.user, t.id)) fail(403, 'Only the owner and managers can change the team.');
   const b = req.body || {};
   const f = readTeamFields(b);
   if (f.name !== undefined || f.description !== undefined || req.file || b.remove_logo) {
@@ -192,9 +216,8 @@ r.post('/work/join', h((req, res) => {
 
 r.post('/work/teams/:id/leave', h((req, res) => {
   const t = activeTeamOr404(req.params.id);
-  const role = memberRole(req.user, t.id);
-  if (!role) fail(400, 'You are not on this team.');
-  if (role === 'owner') fail(400, 'Owners can’t leave. Make someone else the owner first, or delete the team.');
+  if (!memberRole(req.user, t.id)) fail(400, 'You are not on this team.');
+  if (t.owner_id === req.user.id) fail(400, 'Owners can’t leave. Make someone else the owner first, or delete the team.');
   removeMember(t.id, req.user.id);
   res.json({ ok: true });
 }));
@@ -202,7 +225,9 @@ r.post('/work/teams/:id/leave', h((req, res) => {
 // ---------- members ----------
 r.get('/work/members', h((req, res) => {
   const t = team(req);
-  const manage = canManageTeam(req.user, t);
+  const monitor = canMonitor(req.user, t);
+  const analytics = canSeeAnalytics(req.user, t);
+  const owner = teamRow(t).owner_id;
   const today = localDay();
   const s = teamSettings(t);
   const rows = all("SELECT m.user_id, m.role, m.joined_at FROM team_members m JOIN users u ON u.id = m.user_id WHERE m.team_id = ? AND u.status = 'active'", t);
@@ -211,46 +236,66 @@ r.get('/work/members', h((req, res) => {
     return {
       ...u,
       team_role: m.role,
+      is_owner: m.user_id === owner,
       joined_at: m.joined_at,
-      canPost: m.role !== 'member' || !!s.members_can_post,
-      ...(manage ? {
+      canPost: m.role !== 'agent' || m.user_id === owner || !!s.members_can_post,
+      // SMEs, team leaders and managers monitor activity; mood check-ins are for managers only.
+      ...(monitor ? {
         last_active_at: get('SELECT last_active_at FROM users WHERE id = ?', m.user_id).last_active_at,
-        mood_today: get('SELECT mood FROM mood_logs WHERE user_id = ? AND day = ? ORDER BY id DESC LIMIT 1', m.user_id, today)?.mood || null,
         active_days_7: get('SELECT COUNT(*) c FROM activity_days WHERE user_id = ? AND day > ?', m.user_id, addDays(today, -7)).c,
       } : {}),
+      ...(analytics ? { mood_today: get('SELECT mood FROM mood_logs WHERE user_id = ? AND day = ? ORDER BY id DESC LIMIT 1', m.user_id, today)?.mood || null } : {}),
     };
-  }).sort((a, b) => ROLE_ORDER.indexOf(a.team_role) - ROLE_ORDER.indexOf(b.team_role) || a.full_name.localeCompare(b.full_name)));
+  }).sort((a, b) => (b.is_owner - a.is_owner) || ROLE_RANK[b.team_role] - ROLE_RANK[a.team_role] || a.full_name.localeCompare(b.full_name)));
 }));
 
-// Owner: make someone an admin or a member, or hand over ownership.
+/** Can `actor` act on `target` (change their role or remove them)? The owner can act on anyone; others only on lower roles. */
+function outranks(actorId, targetId, teamId) {
+  const t = teamRow(teamId);
+  if (t.owner_id === actorId) return true;
+  if (t.owner_id === targetId) return false;
+  return ROLE_RANK[memberRole(actorId, teamId)] > ROLE_RANK[memberRole(targetId, teamId)];
+}
+
+// Assign a role (owner and managers), or hand over ownership (owner only, with { owner: true }).
 r.patch('/work/teams/:id/members/:userId', h((req, res) => {
   const t = activeTeamOr404(req.params.id);
-  mustOwn(req, t.id);
   const uid = Number(req.params.userId);
-  if (uid === req.user.id) fail(400, 'Pick someone else.');
-  if (!memberRole(uid, t.id)) fail(404, 'That person is not on this team.');
-  const role = req.body?.role;
-  if (!ROLE_ORDER.includes(role)) fail(400, 'Choose owner, admin or member.');
-  tx(() => {
-    if (role === 'owner') {
-      run("UPDATE team_members SET role = 'admin' WHERE team_id = ? AND user_id = ?", t.id, req.user.id);
+  const current = memberRole(uid, t.id);
+  if (!current) fail(404, 'That person is not on this team.');
+  if (req.body?.owner) {
+    mustOwn(req, t.id);
+    if (uid === req.user.id) fail(400, 'You already own this team.');
+    tx(() => {
       run('UPDATE teams SET owner_id = ? WHERE id = ?', uid, t.id);
-      syncChannels(t.id, req.user.id, 'admin');
-    }
+      syncChannels(t.id, req.user.id, memberRole(req.user, t.id));
+      syncChannels(t.id, uid, current);
+    });
+    notify({ userId: uid, type: 'team', actorId: req.user.id, entityType: 'team', entityId: t.id, title: t.name, body: `${req.user.full_name} made you the owner of ${t.name}.` });
+    return res.json({ ok: true, owner: uid, role: current });
+  }
+  if (!canAssignRoles(req.user, t.id)) fail(403, 'Only the owner and managers can assign roles.');
+  const role = readRole(req.body?.role, null);
+  if (!role) fail(400, 'Choose Manager, Team Leader, SME or Agent.');
+  const self = uid === req.user.id;
+  // The owner can set anyone's role, including their own. Managers assign roles to people below them.
+  if (self ? t.owner_id !== req.user.id : !outranks(req.user.id, uid, t.id)) fail(403, self ? 'Ask the owner to change your role.' : 'You can only change the role of people below you.');
+  tx(() => {
     run('UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?', role, t.id, uid);
     syncChannels(t.id, uid, role);
   });
-  const what = role === 'owner' ? 'made you the owner of' : role === 'admin' ? 'made you an admin of' : 'changed your role in';
-  notify({ userId: uid, type: 'team', actorId: req.user.id, entityType: 'team', entityId: t.id, title: t.name, body: `${req.user.full_name} ${what} ${t.name}.` });
+  if (!self && role !== current) notify({ userId: uid, type: 'team', actorId: req.user.id, entityType: 'team', entityId: t.id, title: t.name, body: `${req.user.full_name} made you ${anRole(role)} in ${t.name}.` });
   res.json({ ok: true, role });
 }));
 
+// Remove a member: the owner removes anyone; managers and team leaders remove people below them.
 r.delete('/work/teams/:id/members/:userId', h((req, res) => {
   const t = activeTeamOr404(req.params.id);
-  mustOwn(req, t.id);
+  mustManage(req, t.id);
   const uid = Number(req.params.userId);
-  if (uid === req.user.id) fail(400, 'Owners can’t remove themselves.');
+  if (uid === req.user.id) fail(400, 'You can’t remove yourself. Leave the team instead.');
   if (!memberRole(uid, t.id)) fail(404, 'That person is not on this team.');
+  if (!outranks(req.user.id, uid, t.id)) fail(403, 'You can only remove people below you.');
   removeMember(t.id, uid);
   notify({ userId: uid, type: 'team', actorId: req.user.id, title: t.name, body: `You were removed from ${t.name}.` });
   res.json({ ok: true });
@@ -277,7 +322,7 @@ r.get('/work/invites', h((req, res) => res.json(myInvites(req.user).map(inviteOu
 // Invite friends (userIds), or anyone by username or email (identifiers). Emails without an account get an email invitation.
 r.post('/work/teams/:id/invites', h(async (req, res) => {
   const t = activeTeamOr404(req.params.id);
-  if (!canInvite(req.user, t.id)) fail(403, 'Only team owners and admins can invite people.');
+  if (!canInvite(req.user, t.id)) fail(403, 'Only managers and team leaders can invite people.');
   const ids = [].concat(req.body?.userIds || []).map(Number).filter(Boolean).slice(0, 50);
   const idents = [].concat(req.body?.identifiers || []).map((x) => String(x).trim().replace(/^@/, '')).filter(Boolean).slice(0, 20);
   if (!ids.length && !idents.length) fail(400, 'Choose friends, or enter a username or email.');
@@ -309,7 +354,7 @@ r.post('/work/teams/:id/invites', h(async (req, res) => {
 
 r.get('/work/teams/:id/invites', h((req, res) => {
   const t = activeTeamOr404(req.params.id);
-  if (!canInvite(req.user, t.id)) fail(403, 'Only team owners and admins can see invitations.');
+  if (!canInvite(req.user, t.id)) fail(403, 'Only managers and team leaders can see invitations.');
   res.json(all("SELECT * FROM team_invites WHERE team_id = ? AND status = 'pending' ORDER BY id DESC", t.id).map(inviteOut));
 }));
 
@@ -317,7 +362,7 @@ r.post('/work/invites/:id', h((req, res) => {
   const i = get("SELECT * FROM team_invites WHERE id = ? AND status = 'pending'", Number(req.params.id));
   if (!i) fail(404, 'This invitation is no longer available.');
   const decision = req.body?.decision;
-  // The invitee accepts or declines; owners/admins (or whoever sent it) can cancel.
+  // The invitee accepts or declines; managers, team leaders (or whoever sent it) can cancel.
   if (decision === 'cancel') {
     if (!(canManageTeam(req.user, i.team_id) || i.invited_by === req.user.id)) fail(403, 'You can’t cancel this invitation.');
     run("UPDATE team_invites SET status = 'cancelled', responded_at = ? WHERE id = ?", nowIso(), i.id);
@@ -341,7 +386,7 @@ r.post('/work/invites/:id', h((req, res) => {
 r.get('/work/teams/:id/channels', h((req, res) => {
   const t = activeTeamOr404(req.params.id);
   if (!canAccessTeam(req.user, t.id)) fail(403, 'You are not on this team.');
-  res.json(all('SELECT id, name, description, created_at FROM conversations WHERE team_id = ? ORDER BY id', t.id));
+  res.json(all("SELECT id, name, description, team_channel, created_at FROM conversations WHERE team_id = ? ORDER BY team_channel IS NULL, CASE team_channel WHEN 'general' THEN 1 WHEN 'announcements' THEN 2 WHEN 'schedules' THEN 3 WHEN 'meetings' THEN 4 WHEN 'projects' THEN 5 END, id", t.id));
 }));
 r.post('/work/teams/:id/channels', h((req, res) => {
   const t = activeTeamOr404(req.params.id);
@@ -352,13 +397,13 @@ r.post('/work/teams/:id/channels', h((req, res) => {
   const cid = tx(() => createChannel(t.id, name, req.user.id));
   run('UPDATE conversations SET description = ? WHERE id = ?', String(req.body?.description || '').trim().slice(0, 300), cid);
   emitToUsers(teamMemberIds(t.id), 'conversation:update', { id: cid });
-  res.status(201).json(get('SELECT id, name, description, created_at FROM conversations WHERE id = ?', cid));
+  res.status(201).json(get('SELECT id, name, description, team_channel, created_at FROM conversations WHERE id = ?', cid));
 }));
 r.delete('/work/channels/:id', h((req, res) => {
   const c = get('SELECT * FROM conversations WHERE id = ? AND team_id IS NOT NULL', Number(req.params.id));
   if (!c) fail(404, 'Channel not found.');
   mustManage(req, c.team_id);
-  if (channelIds(c.team_id).length <= 1) fail(400, 'A team keeps at least one channel.');
+  if (c.team_channel) fail(400, `#${c.name} is one of the team’s standard channels and can’t be deleted.`);
   const members = teamMemberIds(c.team_id);
   run('DELETE FROM conversations WHERE id = ?', c.id);
   emitToUsers(members, 'conversation:update', { id: c.id });
@@ -390,11 +435,12 @@ r.get('/work/feed', h((req, res) => {
 
 r.post('/work/posts', imageUpload.array('images', 10), h((req, res) => {
   const t = team(req, req.body);
-  if (!canPostInTeam(req.user, t)) fail(403, 'Only team owners and admins can post in this team’s Work feed.');
+  if (!canPostInTeam(req.user, t)) fail(403, 'Agents can’t post in this team’s Work feed. A manager can allow it in team settings.');
   const text = String(req.body?.text || '').trim().slice(0, 5000);
   const files = req.files || [];
   if (!text && !files.length) fail(400, 'Write something or add a photo.');
-  const kind = req.body?.kind === 'announcement' && canManageTeam(req.user, t) ? 'announcement' : 'post';
+  if (req.body?.kind === 'announcement' && !canAnnounce(req.user, t)) fail(403, 'Only managers and team leaders post announcements.');
+  const kind = req.body?.kind === 'announcement' ? 'announcement' : 'post';
   const pinned = ['1', 'true'].includes(req.body?.pinned) && canManageTeam(req.user, t) ? 1 : 0;
   const id = tx(() => {
     const id = Number(run('INSERT INTO posts (user_id, text, team_id, kind, pinned) VALUES (?, ?, ?, ?, ?)', req.user.id, text, t, kind, pinned).lastInsertRowid);
@@ -402,6 +448,7 @@ r.post('/work/posts', imageUpload.array('images', 10), h((req, res) => {
     return id;
   });
   const tn = teamRow(t).name;
+  if (kind === 'announcement') channelUpdate(t, 'announcements', req.user, `📣 ${req.user.full_name}: ${text.slice(0, 300) || 'shared a photo'}`);
   fanout(t, req.user.id, kind === 'announcement'
     ? { type: 'work_announcement', actorId: req.user.id, entityType: 'post', entityId: id, title: `📣 ${tn} announcement`, body: `${req.user.full_name}: ${text.slice(0, 100) || 'New photo'}` }
     : { type: 'work_post', actorId: req.user.id, entityType: 'post', entityId: id, title: `${tn} · Work feed`, body: `${req.user.full_name} posted: ${text.slice(0, 100) || 'a photo'}` });
@@ -418,12 +465,13 @@ r.post('/work/posts/:id/pin', h((req, res) => {
 
 // ---------- schedules ----------
 const schedOut = (s) => ({ ...s, user: s.user_id ? publicUser(s.user_id) : null, label: KIND_LABEL[s.kind] });
+const mustSchedule = (req, t) => { if (!canSchedule(req.user, t)) fail(403, 'Only managers, team leaders and SMEs manage schedules.'); };
 r.get('/work/schedules', h((req, res) => {
   const t = team(req);
   const from = DAY.test(req.query.from || '') ? req.query.from : addDays(localDay(), -7);
   const to = DAY.test(req.query.to || '') ? req.query.to : addDays(from, 41);
-  // Members see team-wide items plus their own; leaders see everyone's (optionally filtered to one person).
-  const manage = canManageTeam(req.user, t);
+  // Agents see team-wide items plus their own; schedulers see everyone's (optionally filtered to one person).
+  const manage = canSchedule(req.user, t);
   const who = manage ? Number(req.query.user) || null : req.user.id;
   const rows = who
     ? all('SELECT * FROM schedules WHERE team_id = ? AND day BETWEEN ? AND ? AND (user_id IS NULL OR user_id = ?) ORDER BY day, start_time', t, from, to, who)
@@ -435,43 +483,196 @@ function readSchedule(b, t) {
   const start = b.start_time ? (TIME.test(b.start_time) ? b.start_time : fail(400, 'Start time must look like 08:00.')) : null;
   const end = b.end_time ? (TIME.test(b.end_time) ? b.end_time : fail(400, 'End time must look like 17:00.')) : null;
   if (kind !== 'rest' && (!start || !end)) fail(400, 'Set a start and end time.');
+  const bs = b.break_start ? (TIME.test(b.break_start) ? b.break_start : fail(400, 'Break start must look like 12:00.')) : null;
+  const be = b.break_end ? (TIME.test(b.break_end) ? b.break_end : fail(400, 'Break end must look like 13:00.')) : null;
+  if (!!bs !== !!be) fail(400, 'Set both a break start and end, or neither.');
   const userId = b.user_id ? Number(b.user_id) : null;
   if (userId && !teamMemberIds(t).includes(userId)) fail(400, 'That person is not on this team.');
-  return { kind, start: kind === 'rest' ? null : start, end: kind === 'rest' ? null : end, userId, title: String(b.title || '').trim().slice(0, 80), notes: String(b.notes || '').trim().slice(0, 500) };
+  const rest = kind === 'rest';
+  return { kind, start: rest ? null : start, end: rest ? null : end, breakStart: rest ? null : bs, breakEnd: rest ? null : be, userId,
+    title: String(b.title || '').trim().slice(0, 80), notes: String(b.notes ?? b.remarks ?? '').trim().slice(0, 500) };
 }
+const schedLine = (v, who) => `${KIND_LABEL[v.kind]}${v.title ? ` “${v.title}”` : ''}${who ? ` for ${who}` : ''}`;
+const timeLine = (v) => (v.start ? ` · ${clock(v.start)} – ${clock(v.end)}${v.breakStart ? ` (break ${clock(v.breakStart)} – ${clock(v.breakEnd)})` : ''}` : '');
+const whoLabel = (ids) => (ids.includes(null) ? 'the whole team' : ids.length === 1 ? publicUser(ids[0])?.full_name : `${ids.length} people`);
 r.post('/work/schedules', h((req, res) => {
   const t = team(req, req.body);
-  mustManage(req, t);
+  mustSchedule(req, t);
   const v = readSchedule(req.body || {}, t);
   const days = [...new Set([].concat(req.body?.days || req.body?.day || []))].filter((d) => DAY.test(d)).slice(0, 62);
   if (!days.length) fail(400, 'Pick at least one date.');
   const userIds = [].concat(req.body?.user_ids || []).map(Number).filter((id) => teamMemberIds(t).includes(id));
   const targets = userIds.length ? userIds : [v.userId];
   const ids = tx(() => days.flatMap((day) => targets.map((uid) => Number(run(
-    'INSERT INTO schedules (team_id, user_id, kind, title, day, start_time, end_time, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    t, uid, v.kind, v.title, day, v.start, v.end, v.notes, req.user.id
+    'INSERT INTO schedules (team_id, user_id, kind, title, day, start_time, end_time, break_start, break_end, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    t, uid, v.kind, v.title, day, v.start, v.end, v.breakStart, v.breakEnd, v.notes, req.user.id
   ).lastInsertRowid))));
-  const when = days.length === 1 ? new Date(`${days[0]}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : `${days.length} days`;
-  const body = `${req.user.full_name} added ${KIND_LABEL[v.kind].toLowerCase()}${v.title ? ` “${v.title}”` : ''} · ${when}${v.start ? ` · ${v.start}–${v.end}` : ''}`;
+  const when = days.length === 1 ? dayLabel(days[0]) : `${days.length} days from ${dayLabel(days[0])}`;
+  const line = `${schedLine(v, whoLabel(targets))} · ${when}${timeLine(v)}`;
   const recipients = targets.includes(null) ? teamMemberIds(t) : targets;
-  recipients.filter((id) => id !== req.user.id).forEach((uid) => notify({ userId: uid, type: 'schedule', actorId: req.user.id, entityType: 'schedule', entityId: ids[0], title: 'Schedule update', body }));
+  recipients.filter((id) => id !== req.user.id).forEach((uid) => notify({ userId: uid, type: 'schedule', actorId: req.user.id, entityType: 'schedule', entityId: ids[0], title: v.kind === 'meeting' ? 'New meeting' : 'Schedule update', body: `${req.user.full_name} added ${line.charAt(0).toLowerCase()}${line.slice(1)}` }));
+  channelUpdate(t, v.kind === 'meeting' ? 'meetings' : 'schedules', req.user, `${v.kind === 'meeting' ? '📅' : '🗓️'} ${req.user.full_name} added ${line.charAt(0).toLowerCase()}${line.slice(1)}${v.notes ? ` · ${v.notes.slice(0, 120)}` : ''}`);
+  res.status(201).json(ids.map((id) => schedOut(get('SELECT * FROM schedules WHERE id = ?', id))));
+}));
+
+// Weekly schedule: one employee (or several), Monday–Sunday, each day a shift or OFF. Replaces those days' shifts and rest days.
+r.post('/work/schedules/week', h((req, res) => {
+  const b = req.body || {};
+  const t = team(req, b);
+  mustSchedule(req, t);
+  const members = teamMemberIds(t);
+  const userIds = [].concat(b.user_ids || b.user_id || []).map(Number).filter((id) => members.includes(id));
+  if (!userIds.length) fail(400, 'Choose the employee this schedule is for.');
+  const days = [].concat(b.days || []).filter((d) => d && DAY.test(d.day)).slice(0, 7);
+  if (!days.length) fail(400, 'Set at least one day.');
+  const remarks = String(b.remarks || '').trim().slice(0, 500);
+  const rows = days.map((d) => (d.off ? { day: d.day, ...readSchedule({ kind: 'rest', notes: remarks }, t) } : { day: d.day, ...readSchedule({ kind: 'shift', start_time: d.start_time, end_time: d.end_time, break_start: d.break_start, break_end: d.break_end, notes: remarks }, t) }));
+  const ids = tx(() => userIds.flatMap((uid) => rows.map((v) => {
+    run("DELETE FROM schedules WHERE team_id = ? AND user_id = ? AND day = ? AND kind IN ('shift','rest')", t, uid, v.day);
+    return Number(run('INSERT INTO schedules (team_id, user_id, kind, title, day, start_time, end_time, break_start, break_end, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      t, uid, v.kind, '', v.day, v.start, v.end, v.breakStart, v.breakEnd, v.notes, req.user.id).lastInsertRowid);
+  })));
+  const sorted = rows.map((v) => v.day).sort();
+  const range = `${dayLabel(sorted[0])} – ${dayLabel(sorted[sorted.length - 1])}`;
+  const summary = rows.slice().sort((a, b2) => a.day.localeCompare(b2.day))
+    .map((v) => `${new Date(`${v.day}T00:00`).toLocaleDateString('en-US', { weekday: 'short' })} ${v.kind === 'rest' ? 'OFF' : `${clock(v.start)}–${clock(v.end)}`}`).join(' · ');
+  userIds.filter((id) => id !== req.user.id).forEach((uid) => notify({ userId: uid, type: 'schedule', actorId: req.user.id, entityType: 'schedule', entityId: ids[0], title: 'Your weekly schedule', body: `${req.user.full_name} set your schedule for ${range}.` }));
+  channelUpdate(t, 'schedules', req.user, `🗓️ ${req.user.full_name} set the weekly schedule for ${whoLabel(userIds)} (${range}): ${summary}`);
   res.status(201).json(ids.map((id) => schedOut(get('SELECT * FROM schedules WHERE id = ?', id))));
 }));
 r.patch('/work/schedules/:id', h((req, res) => {
   const s = get('SELECT * FROM schedules WHERE id = ?', Number(req.params.id));
   if (!s) fail(404, 'Schedule not found.');
-  mustManage(req, s.team_id);
+  mustSchedule(req, s.team_id);
   const v = readSchedule({ ...s, ...req.body }, s.team_id);
   const day = DAY.test(req.body?.day || '') ? req.body.day : s.day;
-  run('UPDATE schedules SET kind = ?, title = ?, day = ?, start_time = ?, end_time = ?, notes = ?, user_id = ? WHERE id = ?', v.kind, v.title, day, v.start, v.end, v.notes, v.userId, s.id);
+  run('UPDATE schedules SET kind = ?, title = ?, day = ?, start_time = ?, end_time = ?, break_start = ?, break_end = ?, notes = ?, user_id = ? WHERE id = ?',
+    v.kind, v.title, day, v.start, v.end, v.breakStart, v.breakEnd, v.notes, v.userId, s.id);
+  if (v.userId && v.userId !== req.user.id) notify({ userId: v.userId, type: 'schedule', actorId: req.user.id, entityType: 'schedule', entityId: s.id, title: 'Schedule changed', body: `${req.user.full_name} changed your ${KIND_LABEL[v.kind].toLowerCase()} on ${dayLabel(day)}${timeLine(v)}` });
+  channelUpdate(s.team_id, v.kind === 'meeting' ? 'meetings' : 'schedules', req.user, `✏️ ${req.user.full_name} changed ${schedLine(v, whoLabel([v.userId])).toLowerCase()} · ${dayLabel(day)}${timeLine(v)}`);
   res.json(schedOut(get('SELECT * FROM schedules WHERE id = ?', s.id)));
 }));
 r.delete('/work/schedules/:id', h((req, res) => {
   const s = get('SELECT * FROM schedules WHERE id = ?', Number(req.params.id));
   if (!s) fail(404, 'Schedule not found.');
-  mustManage(req, s.team_id);
+  mustSchedule(req, s.team_id);
   run('DELETE FROM schedules WHERE id = ?', s.id);
+  if (s.day >= localDay()) channelUpdate(s.team_id, s.kind === 'meeting' ? 'meetings' : 'schedules', req.user, `🗑️ ${req.user.full_name} removed ${schedLine({ kind: s.kind, title: s.title }, whoLabel([s.user_id])).toLowerCase()} · ${dayLabel(s.day)}`);
   res.json({ ok: true });
+}));
+
+// ---------- overview: my schedule, upcoming shift and meeting, latest announcements ----------
+r.get('/work/overview', h((req, res) => {
+  const t = team(req);
+  const today = localDay();
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const mine = (kinds) => all(
+    `SELECT * FROM schedules WHERE team_id = ? AND (user_id = ? OR user_id IS NULL) AND kind IN (${kinds.map(() => '?').join(',')})
+     AND (day > ? OR (day = ? AND (end_time IS NULL OR end_time > ?))) ORDER BY day, start_time LIMIT 1`,
+    t, req.user.id, ...kinds, today, today, hhmm
+  )[0];
+  const shift = mine(['shift', 'overtime']);
+  const meeting = mine(['meeting', 'coaching', 'training']);
+  const todayItems = all('SELECT * FROM schedules WHERE team_id = ? AND (user_id = ? OR user_id IS NULL) AND day = ? ORDER BY start_time', t, req.user.id, today);
+  const announcements = hydratePosts(all("SELECT * FROM posts WHERE team_id = ? AND kind = 'announcement' ORDER BY id DESC LIMIT 3", t), req.user.id);
+  const projects = all("SELECT * FROM team_projects WHERE team_id = ? AND status IN ('planning','active') ORDER BY due_date IS NULL, due_date, id DESC LIMIT 3", t).map(projectOut);
+  res.json({
+    upcomingShift: shift ? schedOut(shift) : null,
+    upcomingMeeting: meeting ? schedOut(meeting) : null,
+    today: todayItems.map(schedOut),
+    announcements,
+    projects,
+  });
+}));
+
+// ---------- projects ----------
+const PROJECT_STATUS = ['planning', 'active', 'on_hold', 'done'];
+const STATUS_LABEL = { planning: 'Planning', active: 'In progress', on_hold: 'On hold', done: 'Done' };
+function projectOut(p) {
+  return { ...p, status_label: STATUS_LABEL[p.status], lead: p.lead_id ? publicUser(p.lead_id) : null, created_by: p.created_by ? publicUser(p.created_by) : null };
+}
+function readProject(b, t, partial = false) {
+  const out = {};
+  if (!partial || b.name !== undefined) { out.name = String(b.name || '').trim().slice(0, 80); if (!out.name) fail(400, 'Name the project.'); }
+  if (!partial || b.description !== undefined) out.description = String(b.description || '').trim().slice(0, 1000);
+  if (!partial || b.status !== undefined) out.status = PROJECT_STATUS.includes(b.status) ? b.status : partial ? fail(400, 'Unknown status.') : 'active';
+  if (!partial || b.due_date !== undefined) out.due_date = b.due_date ? (DAY.test(b.due_date) ? b.due_date : fail(400, 'Due date must be a date.')) : null;
+  if (!partial || b.lead_id !== undefined) {
+    out.lead_id = b.lead_id ? Number(b.lead_id) : null;
+    if (out.lead_id && !teamMemberIds(t).includes(out.lead_id)) fail(400, 'The project lead must be on the team.');
+  }
+  return out;
+}
+r.get('/work/projects', h((req, res) => {
+  const t = team(req);
+  res.json(all("SELECT * FROM team_projects WHERE team_id = ? ORDER BY status = 'done', due_date IS NULL, due_date, id DESC", t).map(projectOut));
+}));
+r.post('/work/projects', h((req, res) => {
+  const t = team(req, req.body);
+  mustManage(req, t);
+  if (get('SELECT COUNT(*) c FROM team_projects WHERE team_id = ?', t).c >= 200) fail(400, 'A team can track up to 200 projects.');
+  const p = readProject(req.body || {}, t);
+  const id = Number(run('INSERT INTO team_projects (team_id, name, description, status, due_date, lead_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    t, p.name, p.description, p.status, p.due_date, p.lead_id, req.user.id).lastInsertRowid);
+  channelUpdate(t, 'projects', req.user, `🚀 ${req.user.full_name} started the project “${p.name}”${p.due_date ? ` · due ${dayLabel(p.due_date)}` : ''}${p.lead_id ? ` · lead: ${publicUser(p.lead_id)?.full_name}` : ''}`);
+  if (p.lead_id && p.lead_id !== req.user.id) notify({ userId: p.lead_id, type: 'team', actorId: req.user.id, entityType: 'team', entityId: t, title: teamRow(t).name, body: `${req.user.full_name} made you the lead of “${p.name}”.` });
+  res.status(201).json(projectOut(get('SELECT * FROM team_projects WHERE id = ?', id)));
+}));
+r.patch('/work/projects/:id', h((req, res) => {
+  const p = get('SELECT * FROM team_projects WHERE id = ?', Number(req.params.id));
+  if (!p || !canAccessTeam(req.user, p.team_id)) fail(404, 'Project not found.');
+  // Managers and team leaders edit any project; a project's lead can update its status.
+  const onlyStatus = Object.keys(req.body || {}).every((k) => k === 'status');
+  if (!canManageTeam(req.user, p.team_id) && !(onlyStatus && p.lead_id === req.user.id)) fail(403, 'Only managers, team leaders and the project lead can update projects.');
+  const f = readProject(req.body || {}, p.team_id, true);
+  const keys = Object.keys(f);
+  if (keys.length) run(`UPDATE team_projects SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...keys.map((k) => f[k]), nowIso(), p.id);
+  if (f.status && f.status !== p.status) channelUpdate(p.team_id, 'projects', req.user, `📌 ${req.user.full_name} moved “${f.name || p.name}” to ${STATUS_LABEL[f.status]}`);
+  res.json(projectOut(get('SELECT * FROM team_projects WHERE id = ?', p.id)));
+}));
+r.delete('/work/projects/:id', h((req, res) => {
+  const p = get('SELECT * FROM team_projects WHERE id = ?', Number(req.params.id));
+  if (!p || !canAccessTeam(req.user, p.team_id)) fail(404, 'Project not found.');
+  mustManage(req, p.team_id);
+  run('DELETE FROM team_projects WHERE id = ?', p.id);
+  res.json({ ok: true });
+}));
+
+// ---------- team analytics (managers and the owner) ----------
+r.get('/work/analytics', h((req, res) => {
+  const t = team(req);
+  if (!canSeeAnalytics(req.user, t)) fail(403, 'Team analytics are for managers and the team owner.');
+  const ids = teamMemberIds(t);
+  const ph = ids.map(() => '?').join(',') || 'NULL';
+  const since = new Date(Date.now() - 7 * 864e5).toISOString();
+  const today = localDay();
+  const ws = addDays(today, -((new Date(`${today}T00:00`).getDay() + 6) % 7));
+  const channels = channelIds(t);
+  const cph = channels.map(() => '?').join(',') || 'NULL';
+  const postsBy = new Map(all('SELECT user_id, COUNT(*) c FROM posts WHERE team_id = ? AND created_at >= ? GROUP BY user_id', t, since).map((r2) => [r2.user_id, r2.c]));
+  const msgsBy = new Map(all(`SELECT sender_id, COUNT(*) c FROM messages WHERE conversation_id IN (${cph}) AND kind != 'system' AND created_at >= ? GROUP BY sender_id`, ...channels, since).map((r2) => [r2.sender_id, r2.c]));
+  const roles = all('SELECT role, COUNT(*) c FROM team_members WHERE team_id = ? GROUP BY role', t);
+  const activeChannels = all(`SELECT c.id, c.name, COUNT(m.id) messages FROM conversations c LEFT JOIN messages m ON m.conversation_id = c.id AND m.kind != 'system' AND m.created_at >= ?
+    WHERE c.team_id = ? GROUP BY c.id ORDER BY messages DESC, c.id LIMIT 5`, since, t);
+  res.json({
+    members: ids.length,
+    roles: TEAM_ROLES.map((r2) => ({ role: r2, label: roleLabel(r2), count: roles.find((x) => x.role === r2)?.c || 0 })),
+    week: {
+      posts: [...postsBy.values()].reduce((a, b2) => a + b2, 0),
+      announcements: get("SELECT COUNT(*) c FROM posts WHERE team_id = ? AND kind = 'announcement' AND created_at >= ?", t, since).c,
+      messages: [...msgsBy.values()].reduce((a, b2) => a + b2, 0),
+      activeMembers: get(`SELECT COUNT(DISTINCT user_id) c FROM activity_days WHERE user_id IN (${ph}) AND day > ?`, ...ids, addDays(today, -7)).c,
+      shifts: get("SELECT COUNT(*) c FROM schedules WHERE team_id = ? AND kind IN ('shift','overtime') AND day BETWEEN ? AND ?", t, ws, addDays(ws, 6)).c,
+      meetings: get("SELECT COUNT(*) c FROM schedules WHERE team_id = ? AND kind = 'meeting' AND day BETWEEN ? AND ?", t, ws, addDays(ws, 6)).c,
+      scheduled: get('SELECT COUNT(DISTINCT user_id) c FROM schedules WHERE team_id = ? AND user_id IS NOT NULL AND day BETWEEN ? AND ?', t, ws, addDays(ws, 6)).c,
+    },
+    projects: Object.fromEntries(PROJECT_STATUS.map((s) => [s, get('SELECT COUNT(*) c FROM team_projects WHERE team_id = ? AND status = ?', t, s).c])),
+    mostActive: ids.map((id) => ({ user: publicUser(id), role: memberRole(id, t), posts: postsBy.get(id) || 0, messages: msgsBy.get(id) || 0 }))
+      .map((x) => ({ ...x, score: x.posts * 3 + x.messages })).filter((x) => x.score).sort((a, b2) => b2.score - a.score).slice(0, 5),
+    activeChannels,
+    mood: teamMood(t),
+  });
 }));
 
 // ---------- team mood analytics ----------
@@ -526,7 +727,7 @@ export function teamMood(t) {
 }
 r.get('/work/mood', h((req, res) => {
   const t = team(req);
-  if (!canManageTeam(req.user, t)) fail(403, 'Team mood analytics are for team owners and admins.');
+  if (!canSeeAnalytics(req.user, t)) fail(403, 'Team mood analytics are for managers and the team owner.');
   res.json(teamMood(t));
 }));
 

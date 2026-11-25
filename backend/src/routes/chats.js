@@ -25,7 +25,7 @@ function requireMember(cid, uid) {
 function requireGroupAdmin(cid, uid) {
   const x = requireMember(cid, uid);
   if (x.conv.type !== 'group') fail(400, 'Only group chats have settings.');
-  // Team channels are run by the team's owners and admins.
+  // Team channels are run by the team's owner, managers and team leaders.
   if (x.conv.team_id ? !canManageTeam(uid, x.conv.team_id) : x.member.role !== 'admin') fail(403, 'Only group admins can change group settings.');
   return x;
 }

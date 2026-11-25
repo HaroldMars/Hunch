@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
+import { TEAM_ROLES, TEAM_CHANNELS } from '../../shared/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../data');
@@ -604,11 +605,12 @@ addColumn('teams', 'logo', 'TEXT');
 addColumn('teams', 'invite_code', 'TEXT');
 addColumn('teams', 'members_can_invite', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('conversations', 'team_id', 'INTEGER REFERENCES teams(id) ON DELETE CASCADE');
+addColumn('conversations', 'team_channel', 'TEXT'); // general | schedules | announcements | meetings | projects; null for custom channels
 db.exec(`
 CREATE TABLE IF NOT EXISTS team_members (
   team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member')),
+  role TEXT NOT NULL DEFAULT 'agent' CHECK (role IN ('manager','tl','sme','agent')),
   joined_at TEXT NOT NULL DEFAULT ${NOW},
   PRIMARY KEY (team_id, user_id)
 );
@@ -673,25 +675,23 @@ if (getSetting('platform_v2') !== '1') {
         run(`UPDATE ${t} SET team_id = -team_id WHERE team_id IS NOT NULL`);
         run(`UPDATE ${t} SET team_id = (SELECT tm.id FROM teams tm WHERE tm.tl_id = -${t}.team_id) WHERE team_id < 0`);
       }
-      // 4. Memberships: TL → owner, manager and SMEs → admins, agents → members. Each team gets a General channel.
+      // 4. Memberships keep each person's company role (manager / TL / SME / agent); the TL owns the team.
       for (const team of all('SELECT * FROM teams')) {
-        const exists = (id) => id && get('SELECT id FROM users WHERE id = ?', id);
-        const add = (uid, role) => exists(uid) && run(
-          `INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)
-           ON CONFLICT(team_id, user_id) DO NOTHING`, team.id, uid, role);
-        const owner = [team.tl_id, team.manager_id, team.created_by].find(exists) || null;
-        add(owner, 'owner');
-        add(team.manager_id, 'admin');
-        add(team.sme_id, 'admin');
+        const user = (id) => id && get('SELECT id, role FROM users WHERE id = ?', id);
+        const add = (uid, fallback) => {
+          const u = user(uid);
+          if (!u) return;
+          const role = TEAM_ROLES.includes(u.role) ? u.role : fallback;
+          run('INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT(team_id, user_id) DO NOTHING', team.id, uid, role);
+        };
+        const owner = [team.tl_id, team.manager_id, team.created_by].find(user) || null;
+        add(owner, 'manager');
+        add(team.manager_id, 'manager');
+        add(team.sme_id, 'sme');
         if (team.tl_id) {
-          all("SELECT id FROM users WHERE team_leader_id = ? AND role = 'sme'", team.tl_id).forEach((u) => add(u.id, 'admin'));
-          all("SELECT id FROM users WHERE team_leader_id = ? AND role = 'agent'", team.tl_id).forEach((u) => add(u.id, 'member'));
+          all("SELECT id FROM users WHERE team_leader_id = ? AND role IN ('sme','agent')", team.tl_id).forEach((u) => add(u.id, 'agent'));
         }
         run('UPDATE teams SET owner_id = ?, invite_code = ? WHERE id = ?', owner, newInviteCode(), team.id);
-        const members = all('SELECT user_id, role FROM team_members WHERE team_id = ?', team.id);
-        if (!members.length) continue;
-        const conv = Number(run("INSERT INTO conversations (type, name, created_by, team_id) VALUES ('group', 'general', ?, ?)", owner, team.id).lastInsertRowid);
-        members.forEach((m) => run('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)', conv, m.user_id, m.role === 'member' ? 'member' : 'admin'));
       }
       // 5. Company roles become regular members; anyone already on a team starts with Work Mode on.
       run("UPDATE users SET legacy_role = role, role = 'user' WHERE role IN ('manager','tl','sme','agent')");
@@ -700,6 +700,74 @@ if (getSetting('platform_v2') !== '1') {
     });
     const broken = db.prepare('PRAGMA foreign_key_check').all();
     if (broken.length) console.warn(`[hunch] platform migration: ${broken.length} rows with a broken reference`, broken.slice(0, 5));
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
+// ---------- v1.0: team structure, scheduling and projects ----------
+// Team roles are now Manager / Team Leader / SME / Agent (the owner is teams.owner_id and also holds one of them).
+// Every team has the five standard channels, schedules carry a break, and teams can track projects.
+addColumn('schedules', 'break_start', 'TEXT');
+addColumn('schedules', 'break_end', 'TEXT');
+db.exec(`
+CREATE TABLE IF NOT EXISTS team_projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('planning','active','on_hold','done')),
+  due_date TEXT,
+  lead_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT ${NOW},
+  updated_at TEXT NOT NULL DEFAULT ${NOW}
+);
+CREATE INDEX IF NOT EXISTS idx_team_projects_team ON team_projects(team_id);
+`);
+/** Team channel chat role: managers, team leaders and the owner moderate channels. */
+export const channelRoleFor = (teamRole, isOwner) => (isOwner || ['manager', 'tl'].includes(teamRole) ? 'admin' : 'member');
+/** Create any of the five standard channels a team is missing, with every member in them. */
+export function ensureTeamChannels(teamId) {
+  const team = get('SELECT owner_id FROM teams WHERE id = ?', teamId);
+  if (!team) return;
+  const members = all('SELECT user_id, role FROM team_members WHERE team_id = ?', teamId);
+  for (const ch of TEAM_CHANNELS) {
+    if (get('SELECT id FROM conversations WHERE team_id = ? AND team_channel = ?', teamId, ch.key)) continue;
+    // An older channel with the same name becomes the standard one.
+    const same = get('SELECT id FROM conversations WHERE team_id = ? AND team_channel IS NULL AND name = ? COLLATE NOCASE ORDER BY id LIMIT 1', teamId, ch.name);
+    if (same) { run('UPDATE conversations SET team_channel = ? WHERE id = ?', ch.key, same.id); continue; }
+    const cid = Number(run("INSERT INTO conversations (type, name, description, created_by, team_id, team_channel) VALUES ('group', ?, ?, ?, ?, ?)",
+      ch.name, ch.description, team.owner_id, teamId, ch.key).lastInsertRowid);
+    members.forEach((m) => run('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING',
+      cid, m.user_id, channelRoleFor(m.role, m.user_id === team.owner_id)));
+  }
+}
+// Once: owner / admin / member become the person's work role, and every team gets the standard channels.
+if (getSetting('team_structure_v3') !== '1') {
+  const sql = get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'team_members'")?.sql || '';
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    tx(() => {
+      if (sql.includes("'owner'")) {
+        rebuildTable('team_members', (s) => s.replace(/CHECK \(role IN \([^)]*\)\)/, "CHECK (role IN ('owner','admin','member','manager','tl','sme','agent'))"));
+        for (const m of all("SELECT m.team_id, m.user_id, m.role, u.legacy_role FROM team_members m JOIN users u ON u.id = m.user_id WHERE m.role IN ('owner','admin','member')")) {
+          const role = TEAM_ROLES.includes(m.legacy_role) ? m.legacy_role : { owner: 'manager', admin: 'tl', member: 'agent' }[m.role];
+          run('UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?', role, m.team_id, m.user_id);
+        }
+        rebuildTable('team_members', (s) => s
+          .replace(/CHECK \(role IN \([^)]*\)\)/, "CHECK (role IN ('manager','tl','sme','agent'))")
+          .replace("DEFAULT 'member'", "DEFAULT 'agent'"));
+      }
+      for (const t of all('SELECT id, owner_id FROM teams')) {
+        ensureTeamChannels(t.id);
+        for (const m of all('SELECT user_id, role FROM team_members WHERE team_id = ?', t.id)) {
+          run('UPDATE conversation_members SET role = ? WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE team_id = ?)',
+            channelRoleFor(m.role, m.user_id === t.owner_id), m.user_id, t.id);
+        }
+      }
+      setSetting('team_structure_v3', '1');
+    });
   } finally {
     db.exec('PRAGMA foreign_keys = ON');
   }

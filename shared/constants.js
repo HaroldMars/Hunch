@@ -44,7 +44,23 @@ export const ROLE_LABELS = {
   agent: 'Agent',
 };
 // Roles inside a Work team.
-export const TEAM_ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member' };
+// Work Mode team roles, highest first. The team's creator also chooses one of these for themselves.
+export const TEAM_ROLES = ['manager', 'tl', 'sme', 'agent'];
+export const TEAM_ROLE_LABELS = { manager: 'Manager', tl: 'Team Leader', sme: 'SME', agent: 'Agent' };
+export const TEAM_ROLE_INFO = {
+  manager: 'Manages members, assigns roles, creates schedules, runs the Work feed and sees team analytics',
+  tl: 'Manages members, creates schedules, posts announcements and runs the team feed',
+  sme: 'Creates schedules, monitors team activity and supports members',
+  agent: 'Views the schedule and team feed, and takes part in team chat',
+};
+// Channels every team starts with. Schedule, meeting, announcement and project updates post into theirs automatically.
+export const TEAM_CHANNELS = [
+  { key: 'general', name: 'general', description: 'Team-wide conversation' },
+  { key: 'schedules', name: 'schedules', description: 'Shift and schedule updates' },
+  { key: 'announcements', name: 'announcements', description: 'Announcements from team leads' },
+  { key: 'meetings', name: 'meetings', description: 'Upcoming meetings' },
+  { key: 'projects', name: 'projects', description: 'Project updates' },
+];
 // Picked during sign-up and shown on profiles.
 export const INTERESTS = ['Music', 'Gaming', 'Travel', 'Food', 'Fitness', 'Art', 'Photography', 'Movies', 'Books', 'Tech', 'Sports', 'Fashion', 'Business', 'Education', 'Nature', 'Pets'];
 export const NOTE_MAX_WORDS = 35;
