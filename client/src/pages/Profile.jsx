@@ -124,10 +124,15 @@ export default function Profile() {
   const mine = uid === user.id;
   const profile = useLoad(() => api(`/users/${uid}`), [uid, user.avatar]);
   const [tab, setTab] = useState('posts');
-  const posts = useLoad(() => (tab === 'posts' || tab === 'reposts' ? api(`/users/${uid}/posts?type=${tab}`) : tab === 'saved' ? api('/users/me/saved') : Promise.resolve([])), [uid, tab]);
+  const posts = useLoad(() => (tab === 'posts' || tab === 'reposts' ? api(`/users/${uid}/posts?type=${tab}`) : tab === 'media' ? api(`/users/${uid}/posts?type=posts`) : tab === 'saved' ? api('/users/me/saved') : Promise.resolve([])), [uid, tab]);
   const [composing, setComposing] = useState(false);
   const [menu, setMenu] = useState(null);
+  const [story, setStory] = useState(null); // this person's active stories (ring on the photo)
+  const [viewing, setViewing] = useState(false);
+  const loadStory = () => api('/stories').then((g) => setStory((g || []).find((x) => x.user.id === uid && x.stories.length) || null)).catch(() => setStory(null));
+  useEffect(() => { loadStory(); }, [uid]);
   const p = profile.data;
+
   if (profile.loading && !p) return <div className="page"><Spinner /></div>;
   if (profile.error) return <div className="page"><TopBar title="Profile" back /><Empty icon="user" title="User not found">{profile.error.message}</Empty></div>;
   return (
@@ -137,42 +142,63 @@ export default function Profile() {
         {mine && <button className="icon-btn" onClick={() => nav('/settings')} aria-label="Settings"><Icon name="settings" /></button>}
         {!mine && <button className="icon-btn" onClick={() => setMenu('menu')} aria-label="More options"><Icon name="more" /></button>}
       </TopBar>
-      <div className="profile-cover" style={p.cover ? { backgroundImage: `url(${p.cover})` } : undefined} />
-      <div className="profile-head">
-        <Avatar user={p} size={96} />
-        <h2>{p.full_name}</h2>
-        <div className="uid">{p.username ? `@${p.username} · ` : ''}{p.user_code}{isStaffRole(p.role) ? ` · ${ROLE_LABELS[p.role]}` : ''}</div>
+      <div className="pf2">
+        <div className="pf2-glow" style={p.cover || p.avatar ? { backgroundImage: `url(${p.cover || p.avatar})` } : undefined} aria-hidden="true" />
+        <div className="pf2-top">
+          <Avatar user={p} size={92} story={story ? (story.allSeen ? 'seen' : 'new') : undefined} onClick={story ? () => setViewing(true) : undefined} />
+          <div className="pf2-actions">
+            {mine ? (
+              <>
+                <button className="btn sm pf2-main" onClick={() => nav('/edit-profile')}>Edit profile</button>
+                <button className="pf2-round" onClick={() => setComposing(true)} aria-label="New post"><Icon name="plus" size={19} /></button>
+              </>
+            ) : (
+              <>
+                <FriendButton user={p} relation={p.relation} onChange={() => { profile.reload(); posts.reload(); }} />
+              </>
+            )}
+          </div>
+        </div>
+        <h2 className="pf2-name">{p.full_name}</h2>
+        <div className="pf2-handle">{p.username ? `@${p.username}` : p.user_code}{isStaffRole(p.role) ? ` · ${ROLE_LABELS[p.role]}` : ''}</div>
+        {p.bio && <p className="pf2-bio">{p.bio}</p>}
         <WorkIdentity p={p} />
-        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-          {p.location && <span className="chip"><Icon name="globe" size={13} /> {p.location}</span>}
-          <span className="chip"><Icon name={p.privacy === 'public' ? 'globe' : 'lock'} size={13} /> {p.privacy === 'public' ? 'Public' : 'Friends only'}</span>
+        <div className="pf2-meta">
+          {p.location && <span><Icon name="location" size={13} /> {p.location}</span>}
+          <span><Icon name={p.privacy === 'public' ? 'globe' : 'lock'} size={13} /> {p.privacy === 'public' ? 'Public' : 'Friends only'}</span>
+          <span><Icon name="calendar" size={13} /> Joined {new Date(p.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
         </div>
-        {p.bio && <p className="bio">{p.bio}</p>}
+        <div className="pf2-stats">
+          <span><b>{p.counts.posts}</b> Posts</span>
+          <span><b>{p.counts.friends}</b> Friends</span>
+          <span><b>{p.counts.reposts}</b> Reposts</span>
+          {!mine && p.mutuals > 0 && <span><b>{p.mutuals}</b> Mutual</span>}
+        </div>
         {p.relation !== 'self' && <MoodCard mood={p.current_mood} name={p.full_name.split(' ')[0]} />}
-        <div className="profile-stats">
-          <div><b>{p.counts.posts}</b><span>Posts</span></div>
-          <div><b>{p.counts.reposts}</b><span>Reposts</span></div>
-          <div><b>{p.counts.friends}</b><span>Friends</span></div>
-          {!mine && <div><b>{p.mutuals}</b><span>Mutual</span></div>}
-        </div>
-        <div className="profile-actions">
-          {mine ? (
-            <>
-              <button className="btn ghost" onClick={() => nav('/edit-profile')}><Icon name="edit" size={17} /> Edit profile</button>
-              <button className="btn" onClick={() => setComposing(true)}><Icon name="plus" size={17} /> New post</button>
-            </>
-          ) : <FriendButton user={p} relation={p.relation} onChange={() => { profile.reload(); posts.reload(); }} />}
-        </div>
       </div>
       {p.canView ? (
         <>
-          {/* Highlights sit between the profile actions and the content tabs. */}
+          {/* Highlights sit between the profile header and the content tabs. */}
           <Highlights userId={uid} mine={mine} owner={p} />
-          <div className="profile-tabs" role="tablist">
-            {[['posts', 'grid', 'Posts'], ['reposts', 'repost', 'Reposts'], ...(mine ? [['saved', 'bookmark', 'Saved']] : []), ['about', 'user', 'About']].map(([k, i, l]) => (
-              <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}><Icon name={i} size={19} /><span>{l}</span></button>
+          <div className="pf2-tabs" role="tablist">
+            {[['posts', 'Posts'], ['media', 'Media'], ['reposts', 'Reposts'], ...(mine ? [['saved', 'Saved']] : []), ['about', 'About']].map(([k, l]) => (
+              <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
+          {tab === 'media' && (posts.loading ? <Spinner /> : (() => {
+            const media = (posts.data || []).filter((x) => x.images?.length);
+            return !media.length ? <Empty icon="image" title="No photos yet">{mine ? 'Photos you post show up here.' : 'Photos they post show up here.'}</Empty> : (
+              <div className="pf2-media">
+                {media.map((x) => (
+                  <button key={x.id} className="pf2-tile" onClick={() => nav(`/post/${x.id}`)}>
+                    <img src={x.images[0]} alt="" loading="lazy" />
+                    {x.images.length > 1 && <span className="n"><Icon name="layers" size={13} /> {x.images.length}</span>}
+                    <span className="stat"><Icon name="heart" size={13} /> {x.likes ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })())}
           {(tab === 'posts' || tab === 'reposts' || tab === 'saved') && (posts.loading ? <Spinner /> : !posts.data.length ? (
             <Empty icon={{ posts: 'image', reposts: 'repost', saved: 'bookmark' }[tab]} title={{ posts: 'No posts yet', reposts: 'No reposts yet', saved: 'Nothing saved yet' }[tab]}>
               {tab === 'posts' ? (mine ? 'Share your first post.' : 'Nothing shared yet.') : tab === 'saved' ? 'Tap ⋯ on any post and choose Save post. Only you can see this list.' : 'Posts reposted from others show up here with their original author.'}
@@ -202,6 +228,7 @@ export default function Profile() {
           onConfirm={async () => { await api(`/users/${p.id}/block`, { method: 'POST' }); toast('Blocked'); profile.reload(); posts.reload(); }} />
       )}
       {menu === 'report' && <ReportSheet target="user" id={p.id} name={p.full_name} onClose={() => setMenu(null)} />}
+      {viewing && story && <StoryViewer groups={[story]} onClose={() => { setViewing(false); loadStory(); }} onChanged={loadStory} />}
       {composing && <Composer onClose={() => setComposing(false)} onPosted={(x) => { posts.setData([x, ...(posts.data || [])]); profile.reload(); }} />}
     </div>
   );

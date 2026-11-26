@@ -1843,3 +1843,41 @@ button.cx-chip { cursor: pointer; }
 .story-ring.new { background: conic-gradient(from 210deg, #feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
 .story-ring > .avatar { box-shadow: 0 0 0 2px var(--bg); }
 .chat-row .story-ring { margin: 0; }
+
+/* ================= Profile redesign ================= */
+.pf2 { position: relative; isolation: isolate; padding: 6px 18px 10px; overflow: hidden; }
+.pf2-glow { position: absolute; z-index: -1; left: -10%; right: -10%; top: -60px; height: 230px; background-size: cover; background-position: center; filter: blur(46px) saturate(1.3); opacity: .35;
+  background-image: radial-gradient(circle at 30% 40%, color-mix(in srgb, var(--primary) 70%, transparent), transparent 70%); }
+.pf2-glow::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 30%, var(--bg)); }
+.pf2-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 4px; }
+.pf2-top > .avatar, .pf2-top > .story-ring { box-shadow: 0 12px 30px rgba(0, 0, 0, .35); }
+.pf2-top > .avatar { box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 12%, transparent), 0 12px 30px rgba(0, 0, 0, .35); }
+.pf2-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pf2-actions .btn { height: 38px; padding: 0 16px; border-radius: 19px; font-size: 14px; }
+.pf2-actions .btn.ghost { background: var(--glass, var(--surface-2)); }
+.pf2-main { background: var(--text) !important; color: var(--bg) !important; }
+.pf2-round { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); display: grid; place-items: center; }
+.pf2-name { margin: 14px 0 0; font-size: 23px; letter-spacing: -.02em; }
+.pf2-handle { color: var(--text-3); font-size: 14px; font-weight: 600; margin-top: 2px; }
+.pf2-bio { margin: 10px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--text-2); white-space: pre-wrap; }
+.pf2 .work-id { justify-content: flex-start; margin-top: 8px; }
+.pf2 .interest-row { justify-content: flex-start; margin-top: 8px; }
+.pf2-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12.5px; color: var(--text-3); }
+.pf2-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.pf2-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 13.5px; color: var(--text-3); }
+.pf2-stats b { color: var(--text); font-size: 15px; margin-right: 3px; }
+.pf2 .mood-card { margin: 12px 0 0; max-width: none; }
+.pf2-tabs { position: sticky; top: 64px; z-index: 15; display: flex; gap: 4px; margin: 10px 16px 10px; padding: 4px; border-radius: 22px; background: var(--surface-2); overflow-x: auto; scrollbar-width: none; }
+.pf2-tabs::-webkit-scrollbar { display: none; }
+.pf2-tabs button { flex: 1 0 auto; height: 36px; padding: 0 14px; border: 0; border-radius: 18px; background: none; color: var(--text-3); font-weight: 700; font-size: 13.5px; white-space: nowrap; transition: background .15s, color .15s; }
+.pf2-tabs button.on { background: var(--text); color: var(--bg); }
+.pf2-media { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 0 16px 20px; }
+.pf2-tile { position: relative; border: 0; padding: 0; border-radius: 18px; overflow: hidden; aspect-ratio: 3 / 4; background: var(--surface-2); cursor: pointer; }
+.pf2-tile:nth-child(4n+1), .pf2-tile:nth-child(4n+4) { aspect-ratio: 3 / 3.4; }
+.pf2-tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .3s; }
+.pf2-tile:hover img { transform: scale(1.04); }
+.pf2-tile .n, .pf2-tile .stat { position: absolute; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700; color: #fff; background: rgba(0, 0, 0, .45); backdrop-filter: blur(8px); }
+.pf2-tile .n { top: 8px; right: 8px; }
+.pf2-tile .stat { left: 8px; bottom: 8px; }
+@media (min-width: 720px) { .pf2-media { grid-template-columns: repeat(3, 1fr); } }
+.pf2 .work-id { text-align: left; align-items: flex-start; }

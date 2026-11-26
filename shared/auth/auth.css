@@ -255,3 +255,78 @@
 @media (hover: none) and (pointer: coarse) {
   input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
 }
+
+/* ================= Black galaxy theme ================= */
+.hx-auth {
+  --hx-bg: #020205;
+  --hx-muted: rgba(214, 220, 245, 0.62);
+  --hx-faint: rgba(214, 220, 245, 0.4);
+  --hx-line: rgba(255, 255, 255, 0.09);
+  --hx-glass: rgba(255, 255, 255, 0.045);
+  --hx-field: rgba(255, 255, 255, 0.05);
+  --hx-field-line: rgba(255, 255, 255, 0.1);
+  --hx-action: linear-gradient(90deg, #8fb5ff 0%, #c4b5fd 55%, #f0e9ff 100%);
+  background:
+    radial-gradient(60% 45% at 12% 8%, rgba(124, 58, 237, 0.22), transparent 70%),
+    radial-gradient(55% 40% at 92% 30%, rgba(37, 99, 235, 0.2), transparent 70%),
+    radial-gradient(70% 50% at 50% 110%, rgba(217, 70, 239, 0.12), transparent 70%),
+    var(--hx-bg);
+}
+.hx-glow.g1 { background: #7c3aed; opacity: 0.18; }
+.hx-glow.g2 { background: #2563eb; opacity: 0.14; }
+.hx-glow.g3 { background: #db2777; opacity: 0.08; }
+.hx-stars { opacity: 0.8; background-size: 100% 100%; }
+.hx-stars::before, .hx-stars::after { content: ''; position: absolute; inset: 0; }
+.hx-stars::before {
+  background-image:
+    radial-gradient(1px 1px at 22% 32%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 68% 8%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 84% 58%, #e9e3ff 50%, transparent 51%), radial-gradient(1px 1px at 36% 78%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 52% 46%, #dbe7ff 50%, transparent 51%), radial-gradient(1.4px 1.4px at 9% 52%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 74% 88%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 96% 16%, #e9e3ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 16% 94%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 58% 66%, #fff 50%, transparent 51%);
+  animation: hx-twinkle 4.5s ease-in-out infinite alternate-reverse;
+}
+.hx-stars::after { /* a faint milky-way band */
+  background: linear-gradient(115deg, transparent 30%, rgba(167, 139, 250, 0.07) 45%, rgba(96, 165, 250, 0.06) 55%, transparent 70%);
+}
+.hx-card { background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)); }
+.hx-planet .orb { background: radial-gradient(circle at 30% 28%, #e0d7ff 0%, #8fa8ff 16%, #4f46e5 40%, #1e1b6b 66%, #07061f 92%); box-shadow: inset -36px -46px 90px rgba(0, 0, 8, 0.9), inset 12px 12px 40px rgba(220, 210, 255, 0.25), 0 0 70px rgba(124, 58, 237, 0.45); }
+.hx-planet .glow { background: radial-gradient(circle, rgba(139, 92, 246, 0.5), rgba(59, 130, 246, 0) 65%); }
+.hx-planet .ring { border-color: rgba(196, 181, 253, 0.4); box-shadow: 0 0 22px rgba(139, 92, 246, 0.3); }
+.hx-auth h1 em { background: linear-gradient(90deg, #a5b4fc, #c084fc 55%, #f0abfc); -webkit-background-clip: text; background-clip: text; }
+.hx-check input:checked { background: #a5b4fc; border-color: #a5b4fc; }
+.hx-field input:focus, .hx-field textarea:focus { border-color: #a5b4fc; box-shadow: 0 0 0 4px rgba(165, 180, 252, 0.14); }
+.hx-auth .hx-btn { box-shadow: 0 10px 30px rgba(139, 92, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+
+/* Choose step: arch hero, sparkle divider, stacked choices */
+.hx-card.choose { position: relative; padding-top: 22px; text-align: center; }
+.hx-arch { position: relative; height: 250px; margin: 0 auto 6px; width: 100%; max-width: 330px; border-radius: 165px 165px 28px 28px; overflow: hidden;
+  background: radial-gradient(80% 70% at 50% 35%, rgba(124, 58, 237, 0.45), transparent 70%), radial-gradient(60% 60% at 80% 90%, rgba(37, 99, 235, 0.35), transparent 70%), #07061a;
+  border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.6), 0 20px 60px rgba(76, 29, 149, 0.35); display: grid; place-items: center; }
+.hx-arch .hx-planet { --s: 150px; }
+.hx-arch .hx-planet .moon { width: 34px; height: 34px; font-size: 16px; }
+.hx-arch-stars { position: absolute; inset: 0; opacity: 0.9;
+  background-image: radial-gradient(1px 1px at 18% 24%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 72% 16%, #fff 50%, transparent 51%), radial-gradient(1.3px 1.3px at 86% 64%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 30% 80%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 56% 40%, #e9e3ff 50%, transparent 51%), radial-gradient(1px 1px at 10% 60%, #fff 50%, transparent 51%); }
+.hx-arch-badge { position: absolute; right: 18px; bottom: 16px; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.hx-spark { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 14px auto 10px; color: #c4b5fd; }
+.hx-spark i { width: 46px; height: 1px; background: linear-gradient(90deg, transparent, rgba(196, 181, 253, 0.6)); }
+.hx-spark i:last-child { transform: scaleX(-1); }
+.hx-spark b { font-size: 20px; text-shadow: 0 0 14px rgba(196, 181, 253, 0.8); }
+.hx-card h2.hx-big { text-align: center; font-size: 26px; line-height: 1.2; margin-bottom: 18px; }
+.hx-card h2.hx-big span { color: var(--hx-muted); font-weight: 700; font-size: 20px; }
+.hx-choices { display: grid; gap: 10px; }
+.hx-auth .hx-choice { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 52px; border-radius: 26px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: background 0.15s, transform 0.12s; }
+.hx-auth .hx-choice:first-child { background: #fff; color: #0b0b14; border-color: transparent; }
+.hx-auth .hx-choice:hover { background: rgba(255, 255, 255, 0.12); }
+.hx-auth .hx-choice:first-child:hover { background: #ecebff; }
+.hx-auth .hx-choice:active { transform: scale(0.985); }
+.hx-back.floating { position: absolute; left: 14px; top: 14px; z-index: 2; }
+/* Wide screens already show the planet beside the card, so the arch is smaller there. */
+@media (min-width: 981px) { .hx-layout.with-hero .hx-arch { height: 170px; max-width: 260px; } .hx-layout.with-hero .hx-arch .hx-planet { --s: 100px; } .hx-layout.with-hero .hx-arch .moon { display: none; } }
+@media (max-width: 560px) {
+  .hx-card, .hx-card.choose { background: none; border: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .hx-layout:has(.hx-card.choose) { align-items: center; min-height: 100dvh; }
+  .hx-back.floating { left: 10px; top: 6px; }
+  .hx-card.choose { padding-top: 46px; }
+}
