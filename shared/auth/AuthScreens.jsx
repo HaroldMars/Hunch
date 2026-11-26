@@ -6,32 +6,50 @@ import Logo from '../Logo.jsx';
 import Icon from '../Icon.jsx';
 import { INTERESTS, isStaffRole } from '../constants.js';
 import './auth.css';
+import friendsPhoto from './img/friends.jpg';
+import face1 from './img/faces/face1.jpg';
+import face2 from './img/faces/face2.jpg';
+import face3 from './img/faces/face3.jpg';
+import face4 from './img/faces/face4.jpg';
+import face5 from './img/faces/face5.jpg';
+import face6 from './img/faces/face6.jpg';
+import face7 from './img/faces/face7.jpg';
+import face8 from './img/faces/face8.jpg';
 
 // Google sign-in is turned off for now (the OAuth client's authorized origins still need setting up).
 // Set to true to bring back the Google button and one-tap.
 const GOOGLE_SIGN_IN = false;
 
-const ORBIT = ['😊', '😎', '🤩', '⚡', '🧐', '😴'];
-const PEOPLE = [['#f5b971', '😊'], ['#8fb8ff', '😎'], ['#c4a4ff', '🤩'], ['#7ee0c3', '⚡']];
+// Decorative photos for the sign-in screens only (never used as anyone's profile picture):
+// friends at sunset in the arch, and people with the mood they're sharing around it.
+const FACES = [[face1, '😊'], [face2, '😎'], [face3, '🤩'], [face4, '🧐'], [face5, '⚡'], [face6, '😴']];
+const PEOPLE = [face7, face8, face3, face2];
 
-/** The glowing mood planet with emoji moods on its orbit. */
-function Planet({ size = 'lg' }) {
+/** Friends photo in an arch frame, with people and their moods floating around it. */
+function PhotoHero({ size = 'lg' }) {
   return (
-    <div className={`hx-planet ${size}`} aria-hidden="true">
+    <div className={`hx-photo ${size}`} aria-hidden="true">
       <span className="glow" />
-      <span className="orb"><i className="c1" /><i className="c2" /><i className="c3" /></span>
-      <span className="ring" />
-      {ORBIT.map((e, i) => <b key={e} className={`moon m${i}`}>{e}</b>)}
+      <div className="frame">
+        <img src={friendsPhoto} alt="" draggable={false} />
+        <span className="shade" />
+      </div>
+      {FACES.map(([src, mood], i) => (
+        <span key={src} className={`face f${i}`}><img src={src} alt="" draggable={false} /><b>{mood}</b></span>
+      ))}
     </div>
   );
 }
 
-/** Top of the card on phones: an arch window into the galaxy with the mood planet, like a hero photo. */
+/** Top of the card on phones: an arch window with the friends photo. */
 function Arch() {
   return (
     <div className="hx-arch" aria-hidden="true">
-      <span className="hx-arch-stars" />
-      <Planet size="sm" />
+      <img className="hx-arch-photo" src={friendsPhoto} alt="" draggable={false} />
+      <span className="hx-arch-shade" />
+      {FACES.slice(0, 3).map(([src, mood], i) => (
+        <span key={src} className={`face a${i}`}><img src={src} alt="" draggable={false} /><b>{mood}</b></span>
+      ))}
       <span className="hx-arch-badge"><Logo size={18} color="#fff" /></span>
     </div>
   );
@@ -52,7 +70,7 @@ export function AuthShell({ children, hero = true }) {
         {hero && (
           <section className="hx-hero" aria-label="About Hunch">
             <Brand />
-            <Planet />
+            <PhotoHero />
             <div className="hx-hero-text">
               <p className="kicker">Connect · Express · Belong</p>
               <h1>Share <em>moments</em>,<br />feel together.</h1>
@@ -74,13 +92,13 @@ export function WelcomeScreen({ onStart, onSignIn }) {
       <span className="hx-stars" />
       <div className="hx-welcome">
         <Brand />
-        <Planet />
+        <PhotoHero />
         <div className="hx-welcome-text">
           <p className="kicker">Connect · Express · Belong</p>
           <h1>Share <em>moments</em>.<br />Feel together.</h1>
           <p className="lede">Share moments. Track moods. Build meaningful connections.</p>
           <div className="hx-people">
-            <span className="faces">{PEOPLE.map(([c, e]) => <i key={e} style={{ background: c }}>{e}</i>)}</span>
+            <span className="faces">{PEOPLE.map((src) => <i key={src}><img src={src} alt="" /></i>)}</span>
             <span>Friends sharing how they feel, every day</span>
           </div>
         </div>
