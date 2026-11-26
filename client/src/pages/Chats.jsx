@@ -4,7 +4,7 @@ import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
 import { useApp, useSocket } from '../store.jsx';
 import { Avatar, HeaderActions, Sheet, Spinner, Empty, TeamLogo, WorkMood, listTime, useLoad, FilePreviews } from '../components/ui.jsx';
-import { MoodCloudsRow, NoteView, NoteComposer } from '../components/MoodClouds.jsx';
+import { StoryViewer } from '../components/Stories.jsx';
 
 export function Streak({ n }) {
   if (!n || n < 2) return null;
@@ -70,12 +70,14 @@ const timeShort = (d) => {
   return s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : listTime(d);
 };
 
-function ChatRow({ c, me, onOpen }) {
+function ChatRow({ c, me, onOpen, story, onStory }) {
   const lm = c.last_message;
   const prefix = lm && lm.kind !== 'system' && lm.sender_id === me ? 'You: ' : c.type === 'group' && lm?.sender_name && lm.kind !== 'system' ? `${lm.sender_name}: ` : '';
   return (
     <button className={`chat-row ${c.unread ? 'unread' : ''}`} onClick={onOpen}>
-      {c.team ? <span className="cr-chan"><span className="hash">#</span></span> : <Avatar src={c.avatar} size={54} online={c.type === 'direct' && c.other?.online} />}
+      {c.team ? <span className="cr-chan"><span className="hash">#</span></span>
+        : <Avatar src={c.avatar} size={56} online={c.type === 'direct' && c.other?.online} story={story}
+          onClick={story ? (e) => { e.stopPropagation(); onStory(); } : undefined} />}
       <div className="cr-main">
         <div className="cr-top">
           <span className="cr-name">{c.type === 'group' && !c.team && <Icon name="users" size={14} />}{c.title}</span>
@@ -100,7 +102,8 @@ export default function Chats() {
   const [convs, setConvs] = useState(null);
   const [teamConvs, setTeamConvs] = useState([]);
   const [teams, setTeams] = useState([]);
-  const [notes, setNotes] = useState(null);
+  const [stories, setStories] = useState([]); // friends' active stories: a ring on their avatar opens them
+  const [viewer, setViewer] = useState(null);
   const [q, setQ] = useState('');
   const [sheet, setSheet] = useState(null);
   const [archived, setArchived] = useState(false);
@@ -113,9 +116,14 @@ export default function Chats() {
       api('/work/chat-teams').then(setTeams).catch(() => setTeams([]));
     }
   };
-  const loadNotes = () => api('/notes').then(setNotes).catch(() => setNotes({ mine: null, friends: [] }));
+  const loadStories = () => api('/stories').then((g) => setStories((g || []).filter((x) => x.user.id !== user.id && x.stories.length))).catch(() => setStories([]));
   useEffect(() => { setConvs(null); load(); refreshUnread(); }, [archived]);
-  useEffect(() => { loadNotes(); }, []);
+  useEffect(() => { loadStories(); }, []);
+  const storyIndex = (c) => (c.type === 'direct' && c.other ? stories.findIndex((g) => g.user.id === c.other.id) : -1);
+  const rowStory = (c) => {
+    const i = storyIndex(c);
+    return i < 0 ? {} : { story: stories[i].allSeen ? 'seen' : 'new', onStory: () => setViewer(i) };
+  };
   useSocket('message:new', load);
   useSocket('conversation:update', load);
   useSocket('message:read', load);
@@ -136,8 +144,7 @@ export default function Chats() {
         <button className="icon-btn" onClick={() => setSheet({ type: 'new' })} aria-label="New message"><Icon name="edit" size={23} /></button>
         <HeaderActions />
       </div>
-      {!archived && <MoodCloudsRow notes={notes} onMine={() => setSheet(notes?.mine ? { type: 'view', note: notes.mine } : { type: 'edit' })} onOpen={(n) => setSheet({ type: 'view', note: n })} />}
-      <div style={{ padding: '0 16px' }}>
+      <div style={{ padding: '4px 16px 0' }}>
         <div className="search-bar glass"><Icon name="search" size={20} stroke={2.2} /><input placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search chats" /></div>
       </div>
       {!archived && (
@@ -161,21 +168,16 @@ export default function Chats() {
                   </span>
                   {t.mood && <span className="tc-mood" title="Most common mood on the team right now">{t.mood.emoji} {t.mood.label}<small>{t.mood.pct}%</small></span>}
                 </button>
-                {t.channels.map((c) => <ChatRow key={c.id} c={c} me={user.id} onOpen={() => nav(`/chats/${c.id}`)} />)}
+                {t.channels.map((c) => <ChatRow key={c.id} c={c} me={user.id} onOpen={() => nav(`/chats/${c.id}`)} {...rowStory(c)} />)}
               </div>
             ))
         ) : convs === null ? <Spinner /> : !shown.length ? (
           archived ? <Empty icon="inbox" title="No archived chats">Archive a chat from its profile page to tidy your list.</Empty>
             : <Empty icon="chat" title={q ? 'No chats match' : filter === 'groups' ? 'No group chats yet' : 'No conversations yet'}>{q ? 'Try another name.' : <>Start chatting with a friend. <button className="link-btn" onClick={() => setSheet({ type: 'new' })}>New message</button></>}</Empty>
-        ) : shown.map((c) => <ChatRow key={c.id} c={c} me={user.id} onOpen={() => nav(`/chats/${c.id}`)} />)}
+        ) : shown.map((c) => <ChatRow key={c.id} c={c} me={user.id} onOpen={() => nav(`/chats/${c.id}`)} {...rowStory(c)} />)}
       </div>
       {sheet?.type === 'new' && <NewChatSheet onClose={() => setSheet(null)} />}
-      {sheet?.type === 'edit' && <NoteComposer initial={sheet.note} onClose={() => setSheet(null)} onSaved={loadNotes} />}
-      {sheet?.type === 'view' && (
-        <NoteView note={sheet.note} onClose={() => setSheet(null)} onChanged={loadNotes}
-          onEdit={() => setSheet({ type: 'edit', note: sheet.note })}
-          onDelete={async () => { await api('/notes/me', { method: 'DELETE' }); setSheet(null); loadNotes(); }} />
-      )}
+      {viewer !== null && <StoryViewer groups={stories} startGroup={viewer} onClose={() => { setViewer(null); loadStories(); }} onChanged={loadStories} />}
     </div>
   );
 }

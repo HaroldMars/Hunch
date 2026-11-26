@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { TEAM_ROLE_LABELS, moodByKey } from '../../../shared/constants.js';
 import { get, all, run } from '../db.js';
 import { auth } from '../auth.js';
-import { h, fail, publicUser, friendIds, areFriends, isBlocked, nowIso, localDay } from '../util.js';
+import { h, fail, publicUser, friendIds, isBlocked, nowIso, localDay } from '../util.js';
 import { notify } from '../notify.js';
 import { streakFor, postMessage, memberIds } from './chats.js';
 import { storyOut, canSeeStory } from './stories.js';
@@ -87,9 +87,9 @@ r.get('/conversations/:id/context', h((req, res) => {
     const byPlace = new Map();
     stories.forEach((s) => { const k = s.place_name; if (!byPlace.has(k)) byPlace.set(k, []); byPlace.get(k).push(s); });
     out.locationStories = { user: publicUser(other), places: [...byPlace.entries()].map(([place, list]) => ({ place, count: list.length, stories: list })) };
-    // Their active Mood Cloud, for friends.
-    const note = areFriends(me, other) ? get('SELECT id, text, mood, emoji, category, created_at FROM notes WHERE user_id = ? AND expires_at > ?', other, nowIso()) : null;
-    out.cloud = note ? { ...note, moodInfo: note.mood ? moodByKey(note.mood) : null } : null;
+    // Their active stories (any audience you can see): a ring on their photo in the chat header opens them.
+    const visible = all('SELECT * FROM stories WHERE user_id = ? AND expires_at > ? ORDER BY id', other, nowIso()).filter((s) => canSeeStory(s, me)).map((s) => storyOut(s, me));
+    out.stories = visible.length ? { user: publicUser(other), stories: visible, allSeen: visible.every((s) => s.seen) } : null;
     return res.json(out);
   }
   out.members = memberIds(conv.id).length;

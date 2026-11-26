@@ -6,7 +6,6 @@ import { useApp, useSocket } from '../store.jsx';
 import { Avatar, TeamLogo, Sheet, Spinner, Empty, Lightbox, Confirm, TopBar, clockTime, timeAgo, useLoad } from '../components/ui.jsx';
 import { startCall } from '../components/Calls.jsx';
 import { StoryViewer } from '../components/Stories.jsx';
-import { NoteView } from '../components/MoodClouds.jsx';
 import { moodByKey } from '@shared/constants.js';
 
 const moodEmoji = (k) => moodByKey(k)?.emoji || '📍';
@@ -110,7 +109,6 @@ export default function ChatInfo() {
   const photoRef = useRef();
   const [ctx, setCtx] = useState(null);
   const [viewer, setViewer] = useState(null);
-  const [cloud, setCloud] = useState(null);
   useEffect(() => { api(`/conversations/${cid}/context`).then(setCtx).catch(() => setCtx(null)); }, [cid]);
   useSocket('conversation:update', ({ id: x }) => x === cid && reload());
 
@@ -184,15 +182,6 @@ export default function ChatInfo() {
       </div>
 
       <div style={{ padding: '0 16px 40px' }}>
-        {ctx?.cloud && (
-          <div className="settings-group">
-            <div className="sg-title">Mood Cloud</div>
-            <button className="cp-cloud" onClick={() => setCloud(ctx.cloud)}>
-              <span className="e">{ctx.cloud.emoji || ctx.cloud.moodInfo?.emoji || '☁️'}</span>
-              <span className="t">{ctx.cloud.text || ctx.cloud.moodInfo?.label}<small>{timeAgo(ctx.cloud.created_at)}</small></span>
-            </button>
-          </div>
-        )}
         {places.length > 0 && (
           <div className="settings-group">
             <div className="sg-title">Location stories</div>
@@ -276,7 +265,6 @@ export default function ChatInfo() {
         </Sheet>
       )}
       {viewer && <StoryViewer groups={viewer.groups} onClose={() => setViewer(null)} />}
-      {cloud && <NoteView note={{ ...cloud, user: conv.other, user_id: conv.other?.id }} onClose={() => setCloud(null)} />}
       {edit && (
         <Sheet title="Group details" onClose={() => setEdit(null)}
           footer={<button className="btn block" disabled={!edit.name.trim()} onClick={() => { const e = edit; setEdit(null); run(() => api(`/conversations/${cid}`, { method: 'PATCH', body: e }), 'Group updated'); }}>Save</button>}>
