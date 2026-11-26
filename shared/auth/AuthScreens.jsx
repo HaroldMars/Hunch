@@ -22,6 +22,18 @@ function Planet({ size = 'lg' }) {
   );
 }
 
+/** Top of the card on phones: an arch window into the galaxy with the mood planet, like a hero photo. */
+function Arch() {
+  return (
+    <div className="hx-arch" aria-hidden="true">
+      <span className="hx-arch-stars" />
+      <Planet size="sm" />
+      <span className="hx-arch-badge"><Logo size={18} color="#fff" /></span>
+    </div>
+  );
+}
+const Spark = () => <div className="hx-spark" aria-hidden="true"><i /><b>✦</b><i /></div>;
+
 function Brand({ small }) {
   return <div className={`hx-logo ${small ? 'sm' : ''}`}><Logo size={small ? 22 : 26} color="#fff" /> Hunch</div>;
 }
@@ -122,6 +134,8 @@ const GoogleG = () => (
 export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: settingsIn, allowSignup = false, initialMode = 'login', onModeChange, onBack }) {
   const settings = settingsIn || {}; // never crash if the server couldn't be reached
   const [mode, setMode] = useState(allowSignup ? initialMode : 'login');
+  // Hunch app: first choose how to continue (Email or Google); the email form opens on request.
+  const [step, setStep] = useState(allowSignup ? 'choose' : 'email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -132,7 +146,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
   const [redirecting, setRedirecting] = useState(null);
   const [shake, doShake] = useShake();
   const googleRef = useRef(null);
-  const google = mode !== 'forgot' && (allowSignup || mode === 'login');
+  const google = mode !== 'forgot' && (allowSignup || mode === 'login') && (!allowSignup || step === 'choose');
 
   const finish = (res, rem) => {
     if (res.app === appKind) return onSession(res, rem);
@@ -163,7 +177,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     s.async = true;
     s.onload = init;
     document.head.appendChild(s);
-  }, [settings.google_client_id, mode]);
+  }, [settings.google_client_id, mode, step]);
 
   const validate = () => {
     const e = {};
@@ -201,7 +215,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     } finally { setBusy(false); }
   };
 
-  const switchMode = (m) => { setMode(m); setAlert(null); setErrors({}); onModeChange?.(m); };
+  const switchMode = (m) => { setMode(m); setAlert(null); setErrors({}); if (m === 'forgot') setStep('email'); onModeChange?.(m); };
 
   if (redirecting) {
     return (
@@ -211,13 +225,47 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     );
   }
 
+  const choosing = allowSignup && step === 'choose' && mode !== 'forgot';
+  const footer = (
+    <p className="hx-foot">
+      {mode === 'forgot' ? <button type="button" className="hx-link" onClick={() => { switchMode('login'); }}>Back to Sign In</button>
+        : !allowSignup ? <>Hunch staff only. Staff accounts are created by a system administrator.</>
+          : mode === 'signup' ? <>Already have an account? <button type="button" className="hx-link" onClick={() => switchMode('login')}>Sign In</button></>
+            : <>Don’t have an account? <button type="button" className="hx-link" onClick={() => switchMode('signup')}>Sign Up</button></>}
+    </p>
+  );
+
+  // Step 1 (Hunch app): the arch hero and a choice of Email or Google.
+  if (choosing) {
+    return (
+      <AuthShell>
+        <div className={`hx-card choose ${shake ? 'shake' : ''}`}>
+          {onBack && <button type="button" className="hx-back floating" onClick={onBack} aria-label="Back"><Icon name="back" size={20} /></button>}
+          <Arch />
+          <Spark />
+          <h2 className="hx-big">{mode === 'login' ? <>Welcome Back!<br /><span>Let’s Reconnect and Share</span></> : <>Join Hunch<br /><span>Share Moments, Feel Together</span></>}</h2>
+          {alert && <div className={`hx-alert ${alert.type}`} role="alert"><Icon name={alert.type === 'error' ? 'close' : 'check'} size={17} /> {alert.text}</div>}
+          {settings.maintenance_banner && mode === 'login' && <div className="hx-alert info"><Icon name="megaphone" size={17} /> {settings.maintenance_banner}</div>}
+          <div className="hx-choices">
+            <button type="button" className="hx-choice" onClick={() => { setStep('email'); setAlert(null); }}><Icon name="mail" size={18} /> {mode === 'login' ? 'Continue with Email' : 'Sign up with Email'}</button>
+            {settings.google_client_id ? <div ref={googleRef} className="hx-google" /> : (
+              <button type="button" className="hx-choice" onClick={() => setAlert({ type: 'info', text: 'Google sign-in isn’t enabled on this server yet. Use your email for now.' })}><GoogleG /> Continue with Google</button>
+            )}
+          </div>
+          {footer}
+        </div>
+      </AuthShell>
+    );
+  }
+
   const title = mode === 'login' ? 'Welcome Back' : mode === 'signup' ? 'Create Account' : 'Reset password';
-  const sub = mode === 'login' ? (allowSignup ? 'Sign in to continue' : 'Sign in to the Admin Dashboard') : mode === 'signup' ? 'Join Hunch to share moments and moods with friends.' : 'Enter your account email. An administrator will be notified to issue you a temporary password.';
+  const sub = mode === 'login' ? (allowSignup ? 'Sign in with your email' : 'Sign in to the Admin Dashboard') : mode === 'signup' ? 'Join Hunch to share moments and moods with friends.' : 'Enter your account email. An administrator will be notified to issue you a temporary password.';
   return (
     <AuthShell>
       <form className={`hx-card ${shake ? 'shake' : ''}`} onSubmit={submit} noValidate>
         <div className="hx-card-top">
-          {onBack ? <button type="button" className="hx-back" onClick={onBack} aria-label="Back"><Icon name="back" size={20} /></button> : <span />}
+          {allowSignup ? <button type="button" className="hx-back" onClick={() => { setStep('choose'); if (mode === 'forgot') switchMode('login'); setAlert(null); setErrors({}); }} aria-label="Back"><Icon name="back" size={20} /></button>
+            : onBack ? <button type="button" className="hx-back" onClick={onBack} aria-label="Back"><Icon name="back" size={20} /></button> : <span />}
           <Brand small />
           <span />
         </div>
@@ -251,12 +299,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
         <button className="hx-btn" disabled={busy}>
           {busy ? <><span className="hx-spin" /> {mode === 'login' ? 'Signing In...' : mode === 'signup' ? 'Creating account...' : 'Sending...'}</> : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send reset request'}
         </button>
-        <p className="hx-foot">
-          {mode === 'forgot' ? <button type="button" className="hx-link" onClick={() => switchMode('login')}>Back to Sign In</button>
-            : !allowSignup ? <>Hunch staff only. Staff accounts are created by a system administrator.</>
-              : mode === 'signup' ? <>Already have an account? <button type="button" className="hx-link" onClick={() => switchMode('login')}>Sign In</button></>
-                : <>Don’t have an account? <button type="button" className="hx-link" onClick={() => switchMode('signup')}>Sign Up</button></>}
-        </p>
+        {footer}
       </form>
     </AuthShell>
   );
