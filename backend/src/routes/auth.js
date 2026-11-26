@@ -116,6 +116,82 @@ r.post('/signup', h((req, res) => {
   completeLogin(res, user, 'client', !!remember);
 }));
 
+// ---------- Sign up with a one-time code ----------
+// 1. /signup/start: name, email, password → a 6-digit code is emailed (nothing is created yet).
+// 2. /signup/verify: email + code → the account is created (already verified) and signed in.
+const CODE_MINUTES = 10;
+const RESEND_SECONDS = 45;
+const MAX_TRIES = 5;
+const hashCode = (email, code) => crypto.createHash('sha256').update(`${String(email).toLowerCase()}:${code}`).digest('hex');
+const devCode = (code) => (process.env.NODE_ENV === 'production' ? undefined : code);
+async function sendSignupCode(p, code) {
+  const emailed = await sendVerificationCode(p.email, p.full_name.split(' ')[0], code).catch(() => false);
+  if (process.env.NODE_ENV !== 'production') console.log(`[hunch] Sign-up code for ${p.email}: ${code}${emailed ? ' (also emailed)' : ''}`);
+  // In production the code can only reach people by email.
+  if (!emailed && process.env.NODE_ENV === 'production') fail(503, 'We couldn’t send your code because email isn’t set up on this server yet. Try Continue with Google.');
+  return emailed;
+}
+
+r.post('/signup/start', h(async (req, res) => {
+  const { full_name = '', email = '', password = '' } = req.body || {};
+  const name = String(full_name).trim().slice(0, 80);
+  const mail = String(email).trim().toLowerCase();
+  if (!name) fail(400, 'Enter your full name.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) fail(400, 'Enter a valid email address.');
+  const err = validatePassword(password);
+  if (err) fail(400, err);
+  if (get('SELECT id FROM users WHERE email = ?', mail)) fail(409, 'An account with this email already exists. Sign in instead.');
+  const prev = get('SELECT * FROM pending_signups WHERE email = ?', mail);
+  const wait = prev ? RESEND_SECONDS - Math.floor((Date.now() - Date.parse(prev.last_sent_at)) / 1000) : 0;
+  if (wait > 0) fail(429, `Please wait ${wait}s before asking for another code.`);
+  const code = String(crypto.randomInt(100000, 1000000));
+  run(`INSERT INTO pending_signups (email, full_name, password_hash, code_hash, expires_at, attempts, last_sent_at) VALUES (?, ?, ?, ?, ?, 0, ?)
+       ON CONFLICT(email) DO UPDATE SET full_name = excluded.full_name, password_hash = excluded.password_hash, code_hash = excluded.code_hash,
+       expires_at = excluded.expires_at, attempts = 0, last_sent_at = excluded.last_sent_at`,
+  mail, name, bcrypt.hashSync(password, 10), hashCode(mail, code), new Date(Date.now() + CODE_MINUTES * 60e3).toISOString(), nowIso());
+  const emailed = await sendSignupCode({ email: mail, full_name: name }, code);
+  res.json({ sentTo: mail, emailed, expiresInMinutes: CODE_MINUTES, resendIn: RESEND_SECONDS, devCode: devCode(code) });
+}));
+
+r.post('/signup/resend', h(async (req, res) => {
+  const mail = String(req.body?.email || '').trim().toLowerCase();
+  const p = get('SELECT * FROM pending_signups WHERE email = ?', mail);
+  if (!p) fail(404, 'Start again: enter your details to get a code.');
+  const wait = RESEND_SECONDS - Math.floor((Date.now() - Date.parse(p.last_sent_at)) / 1000);
+  if (wait > 0) fail(429, `Please wait ${wait}s before asking for another code.`);
+  const code = String(crypto.randomInt(100000, 1000000));
+  run('UPDATE pending_signups SET code_hash = ?, expires_at = ?, attempts = 0, last_sent_at = ? WHERE email = ?',
+    hashCode(mail, code), new Date(Date.now() + CODE_MINUTES * 60e3).toISOString(), nowIso(), mail);
+  const emailed = await sendSignupCode(p, code);
+  res.json({ sentTo: mail, emailed, resendIn: RESEND_SECONDS, devCode: devCode(code) });
+}));
+
+r.post('/signup/verify', h((req, res) => {
+  const mail = String(req.body?.email || '').trim().toLowerCase();
+  const code = String(req.body?.code || '').replace(/\D/g, '');
+  const p = get('SELECT * FROM pending_signups WHERE email = ?', mail);
+  if (!p) fail(404, 'This code has expired. Enter your details again to get a new one.');
+  if (Date.parse(p.expires_at) < Date.now()) fail(400, 'This code has expired. Tap Resend code.');
+  if (p.attempts >= MAX_TRIES) fail(429, 'Too many wrong tries. Tap Resend code to get a new one.');
+  if (hashCode(mail, code) !== p.code_hash) {
+    run('UPDATE pending_signups SET attempts = attempts + 1 WHERE email = ?', mail);
+    const left = MAX_TRIES - p.attempts - 1;
+    fail(400, left > 0 ? `That code isn’t right. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong tries. Tap Resend code to get a new one.');
+  }
+  if (get('SELECT id FROM users WHERE email = ?', mail)) { run('DELETE FROM pending_signups WHERE email = ?', mail); fail(409, 'An account with this email already exists. Sign in instead.'); }
+  const user = tx(() => {
+    const id = Number(run(
+      `INSERT INTO users (username, email, password_hash, full_name, role, must_change_password, verified, profile_completed, signup_method, job_title)
+       VALUES (?, ?, ?, ?, 'user', 0, 1, 0, 'email', '')`,
+      suggestUsername(p.full_name.replace(/\s+/g, '.') || mail.split('@')[0]), mail, p.password_hash, p.full_name
+    ).lastInsertRowid);
+    run('UPDATE users SET user_code = ? WHERE id = ?', codeFor(id), id);
+    run('DELETE FROM pending_signups WHERE email = ?', mail);
+    return get('SELECT * FROM users WHERE id = ?', id);
+  });
+  completeLogin(res, user, 'client', req.body?.remember !== false);
+}));
+
 // Continue with Google: signs in an existing account, or creates one for a new person (Hunch app only).
 // Name, email and profile photo come from Google; username, bio and interests are asked next.
 r.post('/google', h(async (req, res) => {
@@ -168,19 +244,28 @@ r.post('/change-password', auth({ ready: false }), h((req, res) => {
 // Email verification. The code is emailed when SMTP is configured; in development it is also
 // printed to the server console and returned as `devCode` for testing.
 r.post('/verify/send', auth({ ready: false }), h(async (req, res) => {
-  const code = String(crypto.randomInt(100000, 999999));
-  run('UPDATE users SET verify_code = ?, verify_expires = ? WHERE id = ?', code, new Date(Date.now() + 15 * 60e3).toISOString(), req.user.id);
+  const last = req.user.verify_sent_at ? Date.parse(req.user.verify_sent_at) : 0;
+  const wait = RESEND_SECONDS - Math.floor((Date.now() - last) / 1000);
+  // Opening the step twice quickly reuses the code that was just sent.
+  if (wait > 0 && req.user.verify_code) return res.json({ sentTo: req.user.email, emailed: true, resendIn: wait, devCode: devCode(req.user.verify_code) });
+  const code = String(crypto.randomInt(100000, 1000000));
+  run('UPDATE users SET verify_code = ?, verify_expires = ?, verify_attempts = 0, verify_sent_at = ? WHERE id = ?', code, new Date(Date.now() + 15 * 60e3).toISOString(), nowIso(), req.user.id);
   const emailed = await sendVerificationCode(req.user.email, req.user.full_name.split(' ')[0], code);
   if (process.env.NODE_ENV !== 'production') console.log(`[hunch] Verification code for ${req.user.email}: ${code}${emailed ? ' (also emailed)' : ''}`);
-  res.json({ sentTo: req.user.email, emailed, devCode: process.env.NODE_ENV === 'production' ? undefined : code });
+  res.json({ sentTo: req.user.email, emailed, resendIn: RESEND_SECONDS, devCode: process.env.NODE_ENV === 'production' ? undefined : code });
 }));
 
 r.post('/verify', auth({ ready: false }), h((req, res) => {
   const { code = '' } = req.body || {};
   const u = req.user;
-  if (!u.verify_code || u.verify_code !== String(code).trim()) fail(400, 'That code is not correct.');
-  if (new Date(u.verify_expires) < new Date()) fail(400, 'That code has expired. Send a new one.');
-  run('UPDATE users SET verified = 1, verify_code = NULL, verify_expires = NULL WHERE id = ?', u.id);
+  if ((u.verify_attempts || 0) >= MAX_TRIES) fail(429, 'Too many wrong tries. Tap Resend code to get a new one.');
+  if (!u.verify_code || u.verify_code !== String(code).replace(/\D/g, '')) {
+    run('UPDATE users SET verify_attempts = verify_attempts + 1 WHERE id = ?', u.id);
+    const left = MAX_TRIES - (u.verify_attempts || 0) - 1;
+    fail(400, left > 0 ? `That code isn’t right. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong tries. Tap Resend code to get a new one.');
+  }
+  if (new Date(u.verify_expires) < new Date()) fail(400, 'That code has expired. Tap Resend code.');
+  run('UPDATE users SET verified = 1, verify_code = NULL, verify_expires = NULL, verify_attempts = 0 WHERE id = ?', u.id);
   res.json(sessionPayload(get('SELECT * FROM users WHERE id = ?', u.id), req.app_kind));
 }));
 

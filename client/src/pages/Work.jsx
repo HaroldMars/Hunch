@@ -7,6 +7,7 @@ import { api, toForm } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, Sheet, Spinner, Empty, Confirm, FilePreviews, TeamLogo, WorkMood, timeAgo } from '../components/ui.jsx';
 import { PostCard } from '../components/Post.jsx';
+import { usePhotoEditing } from '../components/ImageEditor.jsx';
 import { StoryBar, StoryViewer } from '../components/Stories.jsx';
 
 const RANK = { manager: 4, tl: 3, sme: 2, agent: 1 };
@@ -392,6 +393,7 @@ export function WorkComposer({ ctx, initialKind = 'post', onClose, onPosted }) {
   const [pinned, setPinned] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef();
+  const [editPhoto, photoEditor] = usePhotoEditing(files, setFiles);
   const submit = async () => {
     setBusy(true);
     try {
@@ -411,7 +413,8 @@ export function WorkComposer({ ctx, initialKind = 'post', onClose, onPosted }) {
         </div>
       )}
       <textarea className="input" rows={5} autoFocus placeholder={kind === 'announcement' ? 'What does the team need to know?' : 'Share an update with your team…'} value={text} onChange={(e) => setText(e.target.value)} maxLength={5000} />
-      <FilePreviews files={files} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} />
+      <FilePreviews files={files} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} onEdit={editPhoto} />
+      {photoEditor}
       <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
         <button className="btn ghost sm" onClick={() => ref.current.click()}><Icon name="image" size={17} /> Photos</button>
         {ctx.canManage && <label className="small" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}><input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} /> Pin to top</label>}

@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
 import { MOODS, THEMES } from '@shared/constants.js';
 import { useApp } from '../store.jsx';
+import { canEdit } from './ImageEditor.jsx';
 
 export function timeAgo(iso) {
   if (!iso) return '';
@@ -124,7 +125,8 @@ export function ThemePicker({ value, onChange }) {
   );
 }
 
-export function FilePreviews({ files, onRemove }) {
+/** Thumbnails of picked photos. With onEdit, each editable photo gets an Edit button (crop, zoom, rotate). */
+export function FilePreviews({ files, onRemove, onEdit }) {
   const [urls, setUrls] = useState([]);
   useEffect(() => {
     const u = files.map((f) => URL.createObjectURL(f));
@@ -135,7 +137,11 @@ export function FilePreviews({ files, onRemove }) {
   return (
     <div className="file-previews">
       {urls.map((u, i) => (
-        <div key={u}><img src={u} alt="" /><button type="button" onClick={() => onRemove(i)} aria-label="Remove"><Icon name="close" size={14} /></button></div>
+        <div key={u}>
+          <img src={u} alt="" onClick={onEdit && canEdit(files[i]) ? () => onEdit(i) : undefined} style={onEdit && canEdit(files[i]) ? { cursor: 'pointer' } : undefined} />
+          <button type="button" onClick={() => onRemove(i)} aria-label="Remove"><Icon name="close" size={14} /></button>
+          {onEdit && canEdit(files[i]) && <button type="button" className="fp-edit" onClick={() => onEdit(i)} aria-label="Edit photo"><Icon name="crop" size={12} /> Edit</button>}
+        </div>
       ))}
     </div>
   );

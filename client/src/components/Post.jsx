@@ -4,6 +4,7 @@ import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
 import { useApp } from '../store.jsx';
 import { Avatar, Sheet, Confirm, FilePreviews, Lightbox, Spinner, Empty, timeAgo, useLoad } from './ui.jsx';
+import { usePhotoEditing } from './ImageEditor.jsx';
 
 export function ImageGrid({ images, onOpen }) {
   const { prefs } = useApp();
@@ -158,6 +159,7 @@ export function Composer({ onClose, onPosted }) {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef();
+  const [editPhoto, photoEditor] = usePhotoEditing(files, setFiles);
   const submit = async () => {
     setBusy(true);
     try {
@@ -179,8 +181,10 @@ export function Composer({ onClose, onPosted }) {
         <textarea className="input" autoFocus placeholder="What's on your mind? Add a caption…" value={text} onChange={(e) => setText(e.target.value)}
           style={{ border: 0, background: 'transparent', minHeight: 110, padding: '8px 0' }} maxLength={5000} />
       </div>
-      <FilePreviews files={files} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} />
+      <FilePreviews files={files} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} onEdit={editPhoto} />
+      {files.length > 0 && <p className="small muted" style={{ margin: '8px 0 0' }}>Tap a photo to crop, zoom or rotate it.</p>}
       <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { setFiles([...files, ...e.target.files].slice(0, 10)); e.target.value = ''; }} />
+      {photoEditor}
     </Sheet>
   );
 }

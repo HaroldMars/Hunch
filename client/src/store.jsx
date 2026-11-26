@@ -42,6 +42,8 @@ export function AppProvider({ children }) {
     setSession(null);
     socketRef.current?.disconnect();
     socketRef.current = null;
+    // Signing out: Google one-tap must not sign this person straight back in.
+    try { window.google?.accounts?.id?.disableAutoSelect(); } catch { /* Google script not loaded */ }
   }, []);
 
   const refreshMe = useCallback(async () => {
