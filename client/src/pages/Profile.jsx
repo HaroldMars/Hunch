@@ -367,6 +367,7 @@ export function EditProfile() {
             ? { title: 'Profile picture', round: true, aspects: [{ label: 'Square', value: 1 }], maxSize: 800 }
             : { title: 'Banner', aspects: [{ label: 'Banner', value: 3 }], maxSize: 2400 })}
           doneLabel="Save"
+          preview={{ kind: editing.kind === 'avatar' ? 'avatar' : 'banner', user }}
           onCancel={() => setEditing(null)}
           onDone={(f) => { const kind = editing.kind; setEditing(null); (kind === 'avatar' ? upload : uploadCover)(f); }} />
       )}

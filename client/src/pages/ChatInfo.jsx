@@ -130,7 +130,7 @@ export default function ChatInfo() {
   return (
     <div className="page flush chat-info-v2">
       <div className="cp-hero">
-        {cover && <div className="cp-cover" style={{ backgroundImage: `url(${cover})` }} aria-hidden="true" />}
+        {(conv.other?.cover || cover) && <div className="cp-cover" style={{ backgroundImage: `url(${!team && !group && conv.other?.cover ? conv.other.cover : cover})` }} aria-hidden="true" />}
         <TopBar title="" back />
       </div>
       <div className="chat-profile">

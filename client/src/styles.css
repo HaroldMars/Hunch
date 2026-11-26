@@ -1947,6 +1947,19 @@ button.cx-chip { cursor: pointer; }
 .pf2-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pf2-banner + .pf2-top { padding-left: 14px; position: relative; }
 .pf2-banner + .pf2-top .pf2-actions { padding-bottom: 2px; }
-.ep-cover { height: auto; aspect-ratio: 3 / 1; min-height: 96px; }
+.ep-cover { height: auto; aspect-ratio: 3 / 1; }
 .ep-avatar-edit { position: relative; border: 0; background: none; padding: 0; border-radius: 50%; cursor: pointer; }
 .ep-avatar-edit .badge-cam { position: absolute; right: 2px; bottom: 2px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--primary); color: #fff; border: 3px solid var(--bg); }
+
+/* Photo editor: where the profile photo sits on the banner, and the live profile preview */
+.ie-ava-mark { position: absolute; bottom: 0; aspect-ratio: 1; transform: translateY(50%); border-radius: 50%; border: 2px dashed rgba(255, 255, 255, .85); background: rgba(7, 7, 10, .55) center / cover no-repeat; opacity: .9; }
+.ie-pv { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 16px 0; }
+.ie-pv-label { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, .55); display: flex; align-items: center; gap: 5px; }
+.ie-pv-card { display: flex; flex-direction: column; align-items: flex-start; padding: 8px 8px 10px; border-radius: 16px; background: #000; border: 1px solid rgba(255, 255, 255, .12); box-sizing: content-box; }
+.ie-pv-card b { font-size: 13px; margin-top: 6px; }
+.ie-pv-card small { font-size: 11px; color: rgba(255, 255, 255, .5); }
+.ie-pv-banner { position: relative; overflow: hidden; border-radius: 13px; background: #222; flex-shrink: 0; }
+.ie-pv-ava { position: relative; overflow: hidden; border-radius: 50%; background: #2a2a2e; color: #888; display: grid; place-items: center; box-shadow: 0 0 0 2px rgba(255, 255, 255, .12); flex-shrink: 0; }
+.ie-pv-banner img, .ie-pv-ava img { position: absolute; left: 50%; top: 50%; max-width: none; pointer-events: none; transform-origin: center; }
+.ie-pv-banner img.still, .ie-pv-ava img.still { left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform: none; }
+.ie-pv-top { position: relative; }

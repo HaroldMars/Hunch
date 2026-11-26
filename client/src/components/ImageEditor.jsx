@@ -25,7 +25,19 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
  * file: the picked File. aspects: [{label, value}] where value is width/height or 'original'.
  * round: circular guide (profile photos). maxSize: longest output side in px.
  */
-export default function ImageEditor({ file, title = 'Edit photo', aspects = [{ label: 'Original', value: 'original' }], round = false, maxSize = 2048, doneLabel = 'Done', onCancel, onDone }) {
+// The profile header as people see it (Profile → .pf2): banner 3:1 across the content width
+// (app width, max 440px, minus 18px padding each side), a 92px photo overlapping the banner's
+// bottom edge, 14px in from the left.
+const profileWidth = () => Math.min(typeof window === 'undefined' ? 390 : window.innerWidth, 440) - 36;
+const PROFILE_AVATAR = 92;
+const PROFILE_INSET = 14;
+
+/**
+ * preview: { kind: 'banner' | 'avatar', user } shows a live preview of the profile header with this crop,
+ * and on the banner marks where the profile photo covers it.
+ */
+export default function ImageEditor({ file, title = 'Edit photo', aspects = [{ label: 'Original', value: 'original' }], round = false, maxSize = 2048, doneLabel = 'Done', preview, onCancel, onDone }) {
+  const PROFILE_W = profileWidth();
   const stage = useRef();
   const imgRef = useRef();
   const pointers = useRef(new Map());
@@ -149,6 +161,25 @@ export default function ImageEditor({ file, title = 'Edit photo', aspects = [{ l
   };
 
   const zoomPct = ((zoom - 1) / (MAX_ZOOM - 1)) * 100;
+
+  // The current crop drawn at any width: same transform as the stage, scaled.
+  const cropView = (w, className) => {
+    const m = w / (fw || 1);
+    return (
+      <div className={className} style={{ width: w, height: w / ratio }}>
+        <img src={url} alt="" draggable={false}
+          style={{ width: nat.w * scale * m, height: nat.h * scale * m, transform: `translate(-50%, -50%) translate(${pos.x * m}px, ${pos.y * m}px) rotate(${rot}deg)` }} />
+      </div>
+    );
+  };
+  const pvW = 236;
+  const k = pvW / PROFILE_W;
+  const pu = preview?.user || {};
+  const ready = !!(preview && nat && !failed);
+  const pvBanner = !ready ? null : preview.kind === 'banner' ? cropView(pvW, 'ie-pv-banner')
+    : pu.cover ? <div className="ie-pv-banner" style={{ width: pvW, height: pvW / 3 }}><img className="still" src={pu.cover} alt="" /></div> : null;
+  const pvAva = !ready ? null : preview.kind === 'avatar' ? cropView(PROFILE_AVATAR * k, 'ie-pv-ava')
+    : <div className="ie-pv-ava" style={{ width: PROFILE_AVATAR * k, height: PROFILE_AVATAR * k }}>{pu.avatar ? <img className="still" src={pu.avatar} alt="" /> : <Icon name="user" size={30} />}</div>;
   return createPortal(
     <div className="ie" role="dialog" aria-modal="true" aria-label={title}>
       <div className="ie-head">
@@ -165,6 +196,10 @@ export default function ImageEditor({ file, title = 'Edit photo', aspects = [{ l
         {nat && !failed && (
           <div className={`ie-frame ${round ? 'round' : ''}`} style={{ width: fw, height: fh }}>
             <span className="ie-grid" />
+            {preview?.kind === 'banner' && (
+              <span className="ie-ava-mark" title="Your profile photo covers this part"
+                style={{ left: `${(PROFILE_INSET / PROFILE_W) * 100}%`, width: `${(PROFILE_AVATAR / PROFILE_W) * 100}%`, backgroundImage: pu.avatar ? `url(${pu.avatar})` : undefined }} />
+            )}
           </div>
         )}
         {failed && (
@@ -175,6 +210,18 @@ export default function ImageEditor({ file, title = 'Edit photo', aspects = [{ l
           </div>
         )}
       </div>
+
+      {ready && (
+        <div className="ie-pv">
+          <div className="ie-pv-label"><Icon name="eye" size={13} /> How others see your profile</div>
+          <div className="ie-pv-card" style={{ width: pvW }}>
+            {pvBanner}
+            <div className="ie-pv-top" style={pvBanner ? { marginTop: -(PROFILE_AVATAR * k) / 2, paddingLeft: PROFILE_INSET * k } : undefined}>{pvAva}</div>
+            <b>{pu.full_name || 'Your name'}</b>
+            {pu.username && <small>@{pu.username}</small>}
+          </div>
+        </div>
+      )}
 
       <div className="ie-tools">
         <div className="ie-zoom">
