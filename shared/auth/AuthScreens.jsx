@@ -7,6 +7,10 @@ import Icon from '../Icon.jsx';
 import { INTERESTS, isStaffRole } from '../constants.js';
 import './auth.css';
 
+// Google sign-in is turned off for now (the OAuth client's authorized origins still need setting up).
+// Set to true to bring back the Google button and one-tap.
+const GOOGLE_SIGN_IN = false;
+
 const ORBIT = ['😊', '😎', '🤩', '⚡', '🧐', '😴'];
 const PEOPLE = [['#f5b971', '😊'], ['#8fb8ff', '😎'], ['#c4a4ff', '🤩'], ['#7ee0c3', '⚡']];
 
@@ -195,7 +199,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
   const [redirecting, setRedirecting] = useState(null);
   const [shake, doShake] = useShake();
   const googleRef = useRef(null);
-  const google = mode !== 'forgot' && (allowSignup || mode === 'login') && (!allowSignup || step === 'choose');
+  const google = GOOGLE_SIGN_IN && mode !== 'forgot' && (allowSignup || mode === 'login') && (!allowSignup || step === 'choose');
 
   const finish = (res, rem) => {
     if (res.app === appKind) return onSession(res, rem);
@@ -347,9 +351,9 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
           {settings.maintenance_banner && mode === 'login' && <div className="hx-alert info"><Icon name="megaphone" size={17} /> {settings.maintenance_banner}</div>}
           <div className="hx-choices">
             <button type="button" className="hx-choice" onClick={() => { setStep('email'); setAlert(null); }}><Icon name="mail" size={18} /> {mode === 'login' ? 'Continue with Email' : 'Sign up with Email'}</button>
-            {settings.google_client_id ? <div ref={googleRef} className="hx-google" /> : (
+            {GOOGLE_SIGN_IN && (settings.google_client_id ? <div ref={googleRef} className="hx-google" /> : (
               <button type="button" className="hx-choice" onClick={() => setAlert({ type: 'info', text: 'Google sign-in isn’t enabled on this server yet. Use your email for now.' })}><GoogleG /> Continue with Google</button>
-            )}
+            ))}
           </div>
           {footer}
         </div>

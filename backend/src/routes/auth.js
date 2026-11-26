@@ -128,7 +128,7 @@ async function sendSignupCode(p, code) {
   const emailed = await sendVerificationCode(p.email, p.full_name.split(' ')[0], code).catch(() => false);
   if (process.env.NODE_ENV !== 'production') console.log(`[hunch] Sign-up code for ${p.email}: ${code}${emailed ? ' (also emailed)' : ''}`);
   // In production the code can only reach people by email.
-  if (!emailed && process.env.NODE_ENV === 'production') fail(503, 'We couldn’t send your code because email isn’t set up on this server yet. Try Continue with Google.');
+  if (!emailed && process.env.NODE_ENV === 'production') fail(503, 'We couldn’t send your code because email isn’t set up on this server yet. Please try again later.');
   return emailed;
 }
 
