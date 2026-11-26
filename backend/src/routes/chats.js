@@ -6,6 +6,19 @@ import { emitToUsers, isOnline } from '../realtime.js';
 import { notifyMessage } from '../notify.js';
 import { hydratePost } from './posts.js';
 import { canManageTeam, canAccessTeam, teamRow } from '../teams.js';
+import { workMood, profileMood } from '../moods.js';
+
+// Sender moods in team channels, cached briefly so a page of messages costs one lookup per sender.
+const moodCache = new Map();
+function cachedWorkMood(viewerId, senderId) {
+  const key = `${viewerId}:${senderId}`;
+  const hit = moodCache.get(key);
+  if (hit && hit.t > Date.now() - 15e3) return hit.v;
+  const v = workMood(viewerId, senderId);
+  if (moodCache.size > 5000) moodCache.clear();
+  moodCache.set(key, { t: Date.now(), v });
+  return v;
+}
 
 const r = Router();
 r.use(auth());
@@ -64,6 +77,10 @@ export function messageOut(m, viewerId) {
     sender: m.sender_id ? publicUser(m.sender_id) : null,
     reactions,
   };
+  // Team channels: the sender's work mood, for Work Mode teammates only.
+  if (m.sender_id && m.kind !== 'system' && viewerId && get('SELECT team_id FROM conversations WHERE id = ?', m.conversation_id)?.team_id) {
+    out.sender_mood = cachedWorkMood(viewerId, m.sender_id);
+  }
   if (m.shared_post_id && !m.deleted) out.shared_post = hydratePost(get('SELECT * FROM posts WHERE id = ?', m.shared_post_id), viewerId, 1) || { unavailable: true };
   if (m.story_id && !m.deleted) {
     const st = get('SELECT id, user_id, image, text, mood, theme, expires_at FROM stories WHERE id = ?', m.story_id);
@@ -108,6 +125,10 @@ function conversationOut(conv, me) {
     blocked: conv.type === 'direct' && other ? isBlocked(me, other.id) : false,
     unread,
     streak: streakFor(conv.id),
+    // Beside the streak: the other person's mood, only when you're Work Mode teammates.
+    work_mood: other ? workMood(me, other.id) : null,
+    // Chat → profile → mood: friends and teammates see the current mood there.
+    other_mood: other ? profileMood(me, other.id) : null,
     last_message: last ? {
       id: last.id,
       text: last.deleted ? 'Message unsent' : last.text || (last.image ? '📷 Photo' : last.attachment ? '📎 Attachment' : last.story_id ? 'Replied to a story' : last.shared_post_id ? '🔗 Shared a post' : last.highlight_id ? '✨ Shared a highlight' : ''),

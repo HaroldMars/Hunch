@@ -5,6 +5,7 @@ import { auth } from '../auth.js';
 import { h, fail, imageUpload, fileUrl, deleteStoredFiles, publicUser, friendIds, areFriends, nowIso, hoursFromNow, localDay, blockedIds, canViewProfile, isBlocked } from '../util.js';
 import { postMessage } from './chats.js';
 import { notify } from '../notify.js';
+import { emitToUsers } from '../realtime.js';
 import { teammateIds, teamName, canAccessTeam, resolveTeam } from '../teams.js';
 
 const r = Router();
@@ -546,16 +547,20 @@ r.post('/notes/:id/reply', h((req, res) => {
 
 // ---------- Daily mood check-in ----------
 r.get('/moods/today', h((req, res) => {
-  res.json(get("SELECT mood, created_at FROM mood_logs WHERE user_id = ? AND day = ? AND source = 'checkin' ORDER BY id DESC LIMIT 1", req.user.id, localDay()) || null);
+  res.json(get("SELECT mood, note, created_at FROM mood_logs WHERE user_id = ? AND day = ? AND source = 'checkin' ORDER BY id DESC LIMIT 1", req.user.id, localDay()) || null);
 }));
 
+// Today's check-in, with an optional short note ("Feeling productive today."). Checking in again replaces it.
 r.post('/moods/checkin', h((req, res) => {
   const { mood } = req.body || {};
   if (!MOOD_KEYS.includes(mood)) fail(400, 'Unknown mood.');
+  const note = String(req.body?.note || '').trim().slice(0, 120) || null;
   const existing = get("SELECT id FROM mood_logs WHERE user_id = ? AND day = ? AND source = 'checkin'", req.user.id, localDay());
-  if (existing) run('UPDATE mood_logs SET mood = ?, created_at = ? WHERE id = ?', mood, nowIso(), existing.id);
-  else logMood(req.user.id, mood, 'checkin');
-  res.json({ mood });
+  if (existing) run('UPDATE mood_logs SET mood = ?, note = ?, created_at = ? WHERE id = ?', mood, note, nowIso(), existing.id);
+  else run('INSERT INTO mood_logs (user_id, mood, source, day, note) VALUES (?, ?, ?, ?, ?)', req.user.id, mood, 'checkin', localDay(), note);
+  // Work Mode teammates see the new mood beside the streak right away.
+  emitToUsers(teammateIds(req.user.id).filter((id) => id !== req.user.id), 'mood:update', { userId: req.user.id });
+  res.json({ mood, note });
 }));
 
 r.get('/moods/history', h((req, res) => {

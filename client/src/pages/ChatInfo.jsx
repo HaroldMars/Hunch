@@ -3,7 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
 import { useApp, useSocket } from '../store.jsx';
-import { Avatar, TeamLogo, Sheet, Spinner, Empty, Lightbox, Confirm, TopBar, clockTime, useLoad } from '../components/ui.jsx';
+import { Avatar, TeamLogo, Sheet, Spinner, Empty, Lightbox, Confirm, TopBar, clockTime, timeAgo, useLoad } from '../components/ui.jsx';
+import { startCall } from '../components/Calls.jsx';
+import { StoryViewer } from '../components/Stories.jsx';
+import { NoteView } from '../components/MoodClouds.jsx';
+import { moodByKey } from '@shared/constants.js';
+
+const moodEmoji = (k) => moodByKey(k)?.emoji || '📍';
 import { ReportSheet } from './Profile.jsx';
 import { SharedPost } from './ChatRoom.jsx';
 
@@ -102,6 +108,10 @@ export default function ChatInfo() {
   const [confirm, setConfirm] = useState(null);
   const [edit, setEdit] = useState(null);
   const photoRef = useRef();
+  const [ctx, setCtx] = useState(null);
+  const [viewer, setViewer] = useState(null);
+  const [cloud, setCloud] = useState(null);
+  useEffect(() => { api(`/conversations/${cid}/context`).then(setCtx).catch(() => setCtx(null)); }, [cid]);
   useSocket('conversation:update', ({ id: x }) => x === cid && reload());
 
   if (error) return <div className="page"><TopBar title="Chat" back /><Empty icon="lock" title="Unavailable">{error.message}</Empty></div>;
@@ -114,17 +124,46 @@ export default function ChatInfo() {
   const run = async (fn, msg) => { try { await fn(); if (msg) toast(msg, 'success'); reload(); } catch (e) { toast(e.message, 'error'); } };
   const status = team ? `${team.name} · ${conv.members.length} members` : group ? `${conv.members.length} members` : conv.blocked ? 'Blocked' : conv.other?.online ? 'Active now' : conv.other?.job_title || 'Friend';
 
+  const cover = team ? team.logo : conv.avatar;
+  const mood = !group ? conv.other_mood : null;
+  const st = ctx?.stats;
+  const places = ctx?.locationStories?.places || [];
+  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : n);
   return (
-    <div className="page flush">
-      <TopBar title="" back />
+    <div className="page flush chat-info-v2">
+      <div className="cp-hero">
+        {cover && <div className="cp-cover" style={{ backgroundImage: `url(${cover})` }} aria-hidden="true" />}
+        <TopBar title="" back />
+      </div>
       <div className="chat-profile">
         <div className="avatar-wrap">
-          {team ? <TeamLogo team={team} size={96} /> : <Avatar src={conv.avatar} size={96} online={!group && conv.other?.online} />}
+          {team ? <TeamLogo team={team} size={104} /> : <Avatar src={conv.avatar} size={104} online={!group && conv.other?.online} />}
           {group && admin && !team && <button className="cp-cam" onClick={() => photoRef.current.click()} aria-label="Change group photo"><Icon name="camera" size={16} /></button>}
         </div>
         <h2>{team ? `#${conv.title}` : conv.title}</h2>
-        <div className="muted small">{status}{conv.streak >= 2 ? ` · 🔥 ${conv.streak}-day streak` : ''}</div>
+        <div className="muted small">{!group && conv.other?.username ? `@${conv.other.username}` : status}</div>
+        {mood && (
+          <div className="cp-mood" title={mood.note || undefined}>
+            <span>{mood.emoji} {mood.label}</span><small>Updated {timeAgo(mood.at)}</small>
+            {mood.note && <em>“{mood.note}”</em>}
+          </div>
+        )}
         {group && conv.description && <p className="cp-desc">{conv.description}</p>}
+        {st && (
+          <div className="cp-stats">
+            <div><b>{k(st.photos)}</b><small>Photos</small></div>
+            <div><b>{k(st.messages)}</b><small>Messages</small></div>
+            <div><b>{st.streak >= 1 ? `🔥 ${st.streak}` : '-'}</b><small>Streak</small></div>
+          </div>
+        )}
+        {ctx?.sharedTeams?.map((t) => (
+          <button key={t.id} className="cp-work" onClick={() => nav('/?tab=work')}>
+            <TeamLogo team={t} size={34} />
+            <span><b>{t.role_label}</b><small>{t.name}</small></span>
+            <em><Icon name="lock" size={11} /> Only your team sees this</em>
+          </button>
+        ))}
+        {team && ctx?.team && <div className="cp-work static"><TeamLogo team={ctx.team} size={34} /><span><b>{ctx.team.my_role_label}</b><small>Your role in {ctx.team.name} · {ctx.team.members} members</small></span></div>}
         {group && admin && <button className="link-btn small" style={{ marginTop: 6 }} onClick={() => setEdit({ name: conv.name, description: conv.description || '' })}>Change name, description and image</button>}
         <input ref={photoRef} type="file" accept="image/*" hidden onChange={(e) => e.target.files[0] && run(() => api(`/conversations/${cid}/photo`, { method: 'POST', form: toForm({ photo: e.target.files[0] }) }), 'Group photo updated')} />
         <div className="cp-actions">
@@ -135,6 +174,8 @@ export default function ChatInfo() {
           ) : (
             <button onClick={() => nav(`/u/${conv.other.id}`)}><span><Icon name="user" size={22} /></span>Profile</button>
           )}
+          {!conv.blocked && <button onClick={() => startCall(cid, 'audio', { title: team ? `#${conv.title} · ${team.name}` : conv.title, avatar: cover })}><span><Icon name="phone" size={21} /></span>Call</button>}
+          {!conv.blocked && <button onClick={() => startCall(cid, 'video', { title: team ? `#${conv.title} · ${team.name}` : conv.title, avatar: cover })}><span><Icon name="video" size={22} /></span>Video</button>}
           <button onClick={() => setSheet('search')}><span><Icon name="search" size={22} /></span>Search</button>
           <button onClick={() => run(() => api(`/conversations/${cid}/mute`, { method: 'POST' }), conv.muted ? 'Unmuted' : 'Muted')}>
             <span><Icon name={conv.muted ? 'bell' : 'bellOff'} size={22} /></span>{conv.muted ? 'Unmute' : 'Mute'}</button>
@@ -143,6 +184,27 @@ export default function ChatInfo() {
       </div>
 
       <div style={{ padding: '0 16px 40px' }}>
+        {ctx?.cloud && (
+          <div className="settings-group">
+            <div className="sg-title">Mood Cloud</div>
+            <button className="cp-cloud" onClick={() => setCloud(ctx.cloud)}>
+              <span className="e">{ctx.cloud.emoji || ctx.cloud.moodInfo?.emoji || '☁️'}</span>
+              <span className="t">{ctx.cloud.text || ctx.cloud.moodInfo?.label}<small>{timeAgo(ctx.cloud.created_at)}</small></span>
+            </button>
+          </div>
+        )}
+        {places.length > 0 && (
+          <div className="settings-group">
+            <div className="sg-title">Location stories</div>
+            {places.map((p) => (
+              <button key={p.place} className="place-row" onClick={() => setViewer({ groups: [{ user: ctx.locationStories.user, stories: p.stories }] })}>
+                <span className="pl-ic"><Icon name="location" size={18} /></span>
+                <span className="meta"><b>📍 {p.place}</b><small>{p.count} {p.count === 1 ? 'story' : 'stories'}</small></span>
+                <span className="pl-thumbs">{p.stories.slice(0, 3).map((s) => (s.image ? <img key={s.id} src={s.image} alt="" /> : <i key={s.id}>{moodEmoji(s.mood)}</i>))}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <MediaSection cid={cid} />
 
         {group && (
@@ -213,6 +275,8 @@ export default function ChatInfo() {
           </div>
         </Sheet>
       )}
+      {viewer && <StoryViewer groups={viewer.groups} onClose={() => setViewer(null)} />}
+      {cloud && <NoteView note={{ ...cloud, user: conv.other, user_id: conv.other?.id }} onClose={() => setCloud(null)} />}
       {edit && (
         <Sheet title="Group details" onClose={() => setEdit(null)}
           footer={<button className="btn block" disabled={!edit.name.trim()} onClick={() => { const e = edit; setEdit(null); run(() => api(`/conversations/${cid}`, { method: 'PATCH', body: e }), 'Group updated'); }}>Save</button>}>

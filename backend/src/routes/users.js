@@ -12,6 +12,7 @@ import { sessionPayload } from './auth.js';
 import { workTeams, teammateIds } from '../teams.js';
 import { readInterests } from './auth.js';
 import { parseList } from '../util.js';
+import { profileMood } from '../moods.js';
 
 /** Work data on a profile. Teams are private: only the account owner ever sees their own. */
 const ownWork = (u) => ({
@@ -72,6 +73,8 @@ r.get('/users/:id', h((req, res) => {
     department: self ? req.user.department : '',
     ...(self ? ownWork(u) : {}),
     interests: canView || self ? interests : [],
+    // Current mood: for you, your friends and Work Mode teammates. It never reveals the team itself.
+    current_mood: profileMood(me, u.id),
     relation: relation(me, u.id),
     canView,
     counts,

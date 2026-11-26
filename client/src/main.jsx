@@ -1,12 +1,12 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '@shared/Logo.jsx';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppProvider, useApp } from './store.jsx';
 import { BottomNav } from './components/ui.jsx';
 import { ChangePassword } from './pages/Auth.jsx';
-import { LoginScreen, Onboarding } from '@shared/auth/AuthScreens.jsx';
+import { LoginScreen, Onboarding, WelcomeScreen } from '@shared/auth/AuthScreens.jsx';
 import { api, setToken, consumeHandoff, ADMIN_URL } from './api.js';
 import Timeline from './pages/Timeline.jsx';
 import PostPage from './pages/PostPage.jsx';
@@ -20,6 +20,7 @@ import Search from './pages/Search.jsx';
 import Settings from './pages/Settings.jsx';
 import TripTracker from './components/TripTracker.jsx';
 import PermissionsPrompt from './components/Permissions.jsx';
+import CallLayer from './components/Calls.jsx';
 const MapPage = lazy(() => import('./pages/Map.jsx'));
 import './styles.css';
 
@@ -28,6 +29,32 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 60
 
 function Intro() {
   return <div className="intro"><Logo size={110} color="#fff" /></div>;
+}
+
+// First visit: Welcome → Get Started (sign up) or Sign In. Returning visitors go straight to sign in.
+const WELCOMED = 'hunch_welcomed';
+const welcomed = () => { try { return localStorage.getItem(WELCOMED) === '1'; } catch { return false; } };
+const markWelcomed = () => { try { localStorage.setItem(WELCOMED, '1'); } catch { /* private mode */ } };
+
+function SignedOut() {
+  const { setSession, settings } = useApp();
+  const nav = useNavigate();
+  const { pathname } = useLocation();
+  const go = (path) => { markWelcomed(); nav(path); };
+  const auth = (mode) => (
+    <LoginScreen api={api} appKind="client" otherAppUrl={ADMIN_URL} settings={settings} allowSignup initialMode={mode}
+      onModeChange={(m) => m !== 'forgot' && nav(m === 'signup' ? '/signup' : '/login', { replace: true })}
+      onBack={() => nav('/welcome')}
+      onSession={(res, remember) => { markWelcomed(); setToken(res.token, remember); setSession(res); }} />
+  );
+  return (
+    <Routes>
+      <Route path="/welcome" element={<WelcomeScreen onStart={() => go('/signup')} onSignIn={() => go('/login')} />} />
+      <Route path="/login" element={auth('login')} />
+      <Route path="/signup" element={auth('signup')} />
+      <Route path="*" element={<Navigate to={welcomed() || pathname !== '/' ? '/login' : '/welcome'} replace />} />
+    </Routes>
+  );
 }
 
 function Shell() {
@@ -39,17 +66,7 @@ function Shell() {
   }, []);
   if (booting || !introDone) return <Intro />;
 
-  if (!session) {
-    return (
-      <Routes>
-        {['/login', '/signup'].map((path) => (
-          <Route key={path} path={path} element={<LoginScreen key={path} api={api} appKind="client" otherAppUrl={ADMIN_URL} settings={settings} allowSignup initialMode={path === '/signup' ? 'signup' : 'login'}
-            onSession={(res, remember) => { setToken(res.token, remember); setSession(res); }} />} />
-        ))}
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    );
-  }
+  if (!session) return <SignedOut />;
   if (!ready) return <Onboarding api={api} session={session} setSession={setSession} logout={logout} />;
 
   return (
@@ -76,6 +93,7 @@ function Shell() {
       <NavGate />
       <TripTracker />
       <PermissionsPrompt />
+      <CallLayer />
     </div>
   );
 }

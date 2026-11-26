@@ -26,6 +26,10 @@ import adminRoutes from './routes/admin.js';
 import teamRoutes from './routes/teams.js';
 import mapRoutes from './routes/map.js';
 import workRoutes from './routes/work.js';
+import chatContextRoutes from './routes/chatContext.js';
+import { registerCalls } from './calls.js';
+import { memberIds as chatMemberIds, postMessage as chatPost } from './routes/chats.js';
+import { publicUser } from './util.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -59,6 +63,7 @@ app.use('/api', notificationRoutes);
 app.use('/api', userRoutes);
 app.use('/api', storyRoutes);
 app.use('/api', postRoutes);
+app.use('/api', chatContextRoutes);
 app.use('/api', chatRoutes);
 app.use('/api', mapRoutes);
 app.use('/api', workRoutes);
@@ -107,6 +112,7 @@ io.on('connection', (socket) => {
       memberIds(cid).filter((id) => id !== uid).forEach((id) => io.to(`user:${id}`).emit('typing', { conversationId: cid, userId: uid, name, typing: !!typing }));
     });
   });
+  registerCalls(io, socket, { memberIds: chatMemberIds, postMessage: chatPost, publicUser });
   socket.on('disconnect', () => markOnline(uid, -1));
 });
 
