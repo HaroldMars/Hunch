@@ -774,6 +774,34 @@ if (getSetting('team_structure_v3') !== '1') {
   }
 }
 
+// ---------- v1.1: search history (personalizes For You; each person can clear their own) ----------
+db.exec(`
+CREATE TABLE IF NOT EXISTS search_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  query TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT ${NOW}
+);
+CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(user_id, created_at);
+`);
+
+// ---------- v1.2: sign-up codes ----------
+// A new account is created only after its email code is confirmed. Codes are stored hashed.
+db.exec(`
+CREATE TABLE IF NOT EXISTS pending_signups (
+  email TEXT PRIMARY KEY COLLATE NOCASE,
+  full_name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_sent_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT ${NOW}
+);
+`);
+addColumn('users', 'verify_attempts', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'verify_sent_at', 'TEXT');
+
 // Railway: without a volume the database is wiped on every update (all accounts, posts and passwords reset).
 if (process.env.NODE_ENV === 'production' && process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   console.warn('[hunch] WARNING: no Railway volume is attached. The database is erased on every deploy. Attach a volume at /data.');

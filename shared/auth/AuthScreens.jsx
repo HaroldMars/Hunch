@@ -110,6 +110,51 @@ export function Field({ label, type = 'text', value, onChange, error, autoComple
   );
 }
 
+/** Six one-digit boxes for an emailed code: auto-advance, backspace, paste, and the phone's code autofill. */
+export function OtpInput({ value, onChange, onComplete, disabled, invalid }) {
+  const refs = useRef([]);
+  const digits = Array.from({ length: 6 }, (_, i) => value[i] || '');
+  const set = (next) => {
+    const v = next.replace(/\D/g, '').slice(0, 6);
+    onChange(v);
+    if (v.length === 6) onComplete?.(v);
+    return v;
+  };
+  const onKey = (i) => (e) => {
+    if (e.key === 'Backspace' && !digits[i] && i > 0) { e.preventDefault(); set(value.slice(0, i - 1)); refs.current[i - 1]?.focus(); }
+    if (e.key === 'ArrowLeft' && i > 0) refs.current[i - 1]?.focus();
+    if (e.key === 'ArrowRight' && i < 5) refs.current[i + 1]?.focus();
+  };
+  const onInput = (i) => (e) => {
+    const typed = e.target.value.replace(/\D/g, '');
+    if (!typed) { set(value.slice(0, i) + value.slice(i + 1)); return; }
+    // A paste or autofill can bring several digits at once.
+    const v = set((value.slice(0, i) + typed).slice(0, 6));
+    refs.current[Math.min(v.length, 5)]?.focus();
+  };
+  return (
+    <div className={`hx-otp ${invalid ? 'invalid' : ''}`} role="group" aria-label="6-digit code">
+      {digits.map((d, i) => (
+        <input key={i} ref={(el) => { refs.current[i] = el; }} value={d} onChange={onInput(i)} onKeyDown={onKey(i)} onFocus={(e) => e.target.select()}
+          inputMode="numeric" pattern="[0-9]*" maxLength={i === 0 ? 6 : 1} autoComplete={i === 0 ? 'one-time-code' : 'off'} autoFocus={i === 0}
+          disabled={disabled} aria-label={`Digit ${i + 1}`} className={d ? 'filled' : ''} />
+      ))}
+    </div>
+  );
+}
+
+/** Seconds left before another code can be sent. */
+function useCountdown(seconds) {
+  const [left, setLeft] = useState(seconds || 0);
+  useEffect(() => { setLeft(seconds || 0); }, [seconds]);
+  useEffect(() => {
+    if (left <= 0) return undefined;
+    const t = setTimeout(() => setLeft((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left]);
+  return [left, setLeft];
+}
+
 function useShake() {
   const [shake, setShake] = useState(false);
   const trigger = () => { setShake(false); requestAnimationFrame(() => setShake(true)); setTimeout(() => setShake(false), 450); };
@@ -136,6 +181,10 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
   const [mode, setMode] = useState(allowSignup ? initialMode : 'login');
   // Hunch app: first choose how to continue (Email or Google); the email form opens on request.
   const [step, setStep] = useState(allowSignup ? 'choose' : 'email');
+  // Sign-up code step: { email, emailed, devCode, resendIn }.
+  const [otp, setOtp] = useState(null);
+  const [code, setCode] = useState('');
+  const [resendLeft, setResendLeft] = useCountdown(otp?.resendIn);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -164,7 +213,15 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
           setBusy(true); setAlert(null);
           try { finish(await api('/auth/google', { method: 'POST', body: { credential, remember, app: appKind } }), remember); } catch (e) { setAlert({ type: 'error', text: e.message }); doShake(); } finally { setBusy(false); }
         },
+        // One-tap: returning Google users see their account and sign in with a single tap.
+        auto_select: allowSignup,
+        cancel_on_tap_outside: false,
+        itp_support: true,
+        use_fedcm_for_prompt: true,
+        context: mode === 'signup' ? 'signup' : 'signin',
+        ux_mode: 'popup',
       });
+      if (allowSignup) { try { window.google.accounts.id.prompt(); } catch { /* one-tap unavailable */ } }
       if (googleRef.current) {
         const width = Math.min(400, Math.max(220, googleRef.current.offsetWidth || 340));
         googleRef.current.innerHTML = '';
@@ -204,7 +261,9 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
         const r = await api('/auth/forgot', { method: 'POST', body: { identifier: email.trim() } });
         setAlert({ type: 'success', text: r.message });
       } else if (mode === 'signup') {
-        finish(await api('/auth/signup', { method: 'POST', body: { full_name: fullName.trim(), email: email.trim(), password, remember } }), remember);
+        // Nothing is created yet: we email a code first.
+        const r = await api('/auth/signup/start', { method: 'POST', body: { full_name: fullName.trim(), email: email.trim(), password } });
+        setCode(''); setOtp({ email: r.sentTo, emailed: r.emailed, devCode: r.devCode, resendIn: r.resendIn });
       } else {
         finish(await api('/auth/login', { method: 'POST', body: { identifier: email.trim(), password, remember, app: appKind } }), remember);
       }
@@ -221,6 +280,46 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     return (
       <AuthShell>
         <div className="hx-card"><div className="hx-redirect"><div className="hx-spin" /><h2>Welcome back!</h2><p className="sub" style={{ margin: '8px 0 0' }}>Taking you to the {redirecting}…</p></div></div>
+      </AuthShell>
+    );
+  }
+
+  const verifyCode = async (value = code) => {
+    if (value.length !== 6 || busy) return;
+    setBusy(true); setAlert(null);
+    try { finish(await api('/auth/signup/verify', { method: 'POST', body: { email: otp.email, code: value, remember } }), remember); } catch (e) { setAlert({ type: 'error', text: e.message }); setCode(''); doShake(); } finally { setBusy(false); }
+  };
+  const resend = async () => {
+    setAlert(null);
+    try {
+      const r = await api('/auth/signup/resend', { method: 'POST', body: { email: otp.email } });
+      setOtp((o) => ({ ...o, devCode: r.devCode, emailed: r.emailed, resendIn: r.resendIn + Math.random() / 1000 }));
+      setResendLeft(r.resendIn); setCode('');
+      setAlert({ type: 'success', text: 'A new code is on its way.' });
+    } catch (e) { setAlert({ type: 'error', text: e.message }); }
+  };
+
+  // Sign-up step 2: enter the code we emailed. The account is created when it matches.
+  if (otp) {
+    return (
+      <AuthShell>
+        <form className={`hx-card ${shake ? 'shake' : ''}`} onSubmit={(e) => { e.preventDefault(); verifyCode(); }}>
+          <div className="hx-card-top">
+            <button type="button" className="hx-back" onClick={() => { setOtp(null); setAlert(null); }} aria-label="Back"><Icon name="back" size={20} /></button>
+            <Brand small /><span />
+          </div>
+          <div className="hx-otp-icon"><Icon name="mail" size={26} /></div>
+          <h2>Check your email</h2>
+          <p className="sub">Enter the 6-digit code we sent to<br /><b className="hx-strong">{otp.email}</b></p>
+          {alert && <div className={`hx-alert ${alert.type}`} role="alert"><Icon name={alert.type === 'error' ? 'close' : 'check'} size={17} /> {alert.text}</div>}
+          <OtpInput value={code} onChange={setCode} onComplete={verifyCode} disabled={busy} invalid={alert?.type === 'error'} />
+          {otp.devCode && <div className="hx-alert info"><Icon name="key" size={17} /> Testing mode (no email server): your code is <b style={{ letterSpacing: '.15em' }}>{otp.devCode}</b></div>}
+          <button className="hx-btn" disabled={busy || code.length !== 6} style={{ marginTop: 6 }}>{busy ? <><span className="hx-spin" /> Creating your account...</> : 'Verify & create account'}</button>
+          <p className="hx-foot">
+            Didn’t get it? Check spam, or {resendLeft > 0 ? <span className="hx-wait">resend in {resendLeft}s</span> : <button type="button" className="hx-link" onClick={resend}>Resend code</button>}
+            <br /><button type="button" className="hx-link" onClick={() => { setOtp(null); setAlert(null); }}>Use a different email</button>
+          </p>
+        </form>
       </AuthShell>
     );
   }
@@ -295,9 +394,9 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
             <button type="button" className="hx-link" onClick={() => switchMode('forgot')}>Forgot Password?</button>
           </div>
         )}
-        {mode === 'signup' && <div className="hx-hint ok" style={{ marginTop: -4, marginBottom: 10 }}>8+ characters with letters and numbers. You’ll pick a username next.</div>}
+        {mode === 'signup' && <div className="hx-hint ok" style={{ marginTop: -4, marginBottom: 10 }}>8+ characters with letters and numbers. We’ll email you a code to confirm it’s you.</div>}
         <button className="hx-btn" disabled={busy}>
-          {busy ? <><span className="hx-spin" /> {mode === 'login' ? 'Signing In...' : mode === 'signup' ? 'Creating account...' : 'Sending...'}</> : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send reset request'}
+          {busy ? <><span className="hx-spin" /> {mode === 'login' ? 'Signing In...' : mode === 'signup' ? 'Sending your code...' : 'Sending...'}</> : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Continue' : 'Send reset request'}
         </button>
         {footer}
       </form>
@@ -353,16 +452,20 @@ function VerifyStep({ api, user, busy, run }) {
   const [code, setCode] = useState('');
   const [dev, setDev] = useState('');
   const [sent, setSent] = useState(false);
-  const send = () => api('/auth/verify/send', { method: 'POST' }).then((r) => { setDev(r.devCode || ''); setSent(true); }).catch(() => {});
+  const [wait, setWait] = useState(0);
+  const [left] = useCountdown(wait);
+  const send = () => api('/auth/verify/send', { method: 'POST' }).then((r) => { setDev(r.devCode || ''); setSent(true); setWait((r.resendIn || 45) + Math.random() / 1000); }).catch(() => {});
   useEffect(() => { send(); }, []);
+  const submit = (value = code) => value.length === 6 && !busy && run(() => api('/auth/verify', { method: 'POST', body: { code: value } }).catch((e) => { setCode(''); throw e; }));
   return (
-    <form onSubmit={(e) => { e.preventDefault(); run(() => api('/auth/verify', { method: 'POST', body: { code } })); }}>
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <div className="hx-otp-icon"><Icon name="mail" size={26} /></div>
       <h2>Verify your email</h2>
-      <p className="sub">Welcome to Hunch, {user.full_name.split(' ')[0]}! {sent ? <>We sent a 6-digit code to <b>{user.email}</b>.</> : 'Sending your code…'}</p>
-      <Field label="Verification code" value={code} onChange={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} className="hx-code" autoFocus autoComplete="one-time-code" />
-      {dev && <div className="hx-alert info"><Icon name="key" size={17} /> Local dev mode (no mail server): your code is <b style={{ letterSpacing: '.15em' }}>{dev}</b></div>}
-      <button className="hx-btn" disabled={busy || code.length !== 6}>{busy ? <><span className="hx-spin" /> Verifying...</> : 'Verify & continue'}</button>
-      <div style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="hx-link" onClick={send}>Resend code</button></div>
+      <p className="sub">Welcome to Hunch, {user.full_name.split(' ')[0]}! {sent ? <>Enter the 6-digit code we sent to <b className="hx-strong">{user.email}</b>.</> : 'Sending your code…'}</p>
+      <OtpInput value={code} onChange={setCode} onComplete={submit} disabled={busy} />
+      {dev && <div className="hx-alert info"><Icon name="key" size={17} /> Testing mode (no email server): your code is <b style={{ letterSpacing: '.15em' }}>{dev}</b></div>}
+      <button className="hx-btn" disabled={busy || code.length !== 6} style={{ marginTop: 6 }}>{busy ? <><span className="hx-spin" /> Verifying...</> : 'Verify & continue'}</button>
+      <p className="hx-foot">Didn’t get it? Check spam, or {left > 0 ? <span className="hx-wait">resend in {left}s</span> : <button type="button" className="hx-link" onClick={send}>Resend code</button>}</p>
     </form>
   );
 }

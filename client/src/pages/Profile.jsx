@@ -8,6 +8,7 @@ import { Avatar, TopBar, Spinner, Empty, Sheet, Confirm, MoodCard, useLoad } fro
 import { PostCard, Composer } from '../components/Post.jsx';
 import { StoryViewer, AddToHighlight } from '../components/Stories.jsx';
 import { FriendButton } from './Connect.jsx';
+import ImageEditor, { canEdit } from '../components/ImageEditor.jsx';
 
 function Highlights({ userId, mine, owner }) {
   const nav = useNavigate();
@@ -144,6 +145,7 @@ export default function Profile() {
       </TopBar>
       <div className="pf2">
         <div className="pf2-glow" style={p.cover || p.avatar ? { backgroundImage: `url(${p.cover || p.avatar})` } : undefined} aria-hidden="true" />
+        {p.cover && <div className="pf2-banner"><img src={p.cover} alt={`${p.full_name}'s banner`} /></div>}
         <div className="pf2-top">
           <Avatar user={p} size={92} story={story ? (story.allSeen ? 'seen' : 'new') : undefined} onClick={story ? () => setViewing(true) : undefined} />
           <div className="pf2-actions">
@@ -306,8 +308,17 @@ export function EditProfile() {
   const nav = useNavigate();
   const [f, setF] = useState({ full_name: user.full_name, username: user.username || '', bio: user.bio || '', job_title: user.job_title || '', department: user.department || '', location: user.location || '', privacy: user.privacy, interests: user.interests || [] });
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // { kind: 'avatar' | 'cover', file }
   const ref = useRef();
   const coverRef = useRef();
+  // A picked photo opens the editor first (crop, zoom, rotate); GIFs upload as they are.
+  const pickPhoto = (kind) => (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (canEdit(file)) setEditing({ kind, file });
+    else (kind === 'avatar' ? upload : uploadCover)(file);
+  };
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const apply = (u) => setSession({ ...session, user: u });
   const save = async () => {
@@ -322,30 +333,43 @@ export function EditProfile() {
     try { apply(await api('/users/me/avatar', { method: 'POST', form: toForm({ avatar: file }) })); toast('Profile picture updated', 'success'); } catch (e) { toast(e.message, 'error'); }
   };
   const uploadCover = async (file) => {
-    try { apply(await api('/users/me/cover', { method: 'POST', form: toForm({ cover: file }) })); toast('Cover photo updated', 'success'); } catch (e) { toast(e.message, 'error'); }
+    try { apply(await api('/users/me/cover', { method: 'POST', form: toForm({ cover: file }) })); toast('Banner updated', 'success'); } catch (e) { toast(e.message, 'error'); }
   };
   const toggleInterest = (x) => setF((v) => ({ ...v, interests: v.interests.includes(x) ? v.interests.filter((y) => y !== x) : v.interests.length >= 10 ? v.interests : [...v.interests, x] }));
   return (
     <div className="page">
       <TopBar title="Edit profile" back><button className="btn sm" disabled={busy} onClick={save}>Save</button></TopBar>
       <div className="ep-section">Account information</div>
-      <label className="label">Cover photo</label>
+      <label className="label">Banner</label>
       <div className="ep-cover" style={user.cover ? { backgroundImage: `url(${user.cover})` } : undefined}>
         <div className="ep-cover-actions">
-          <button className="btn ghost sm" onClick={() => coverRef.current.click()}><Icon name="camera" size={16} /> {user.cover ? 'Change' : 'Add cover'}</button>
+          <button className="btn ghost sm" onClick={() => coverRef.current.click()}><Icon name="camera" size={16} /> {user.cover ? 'Change' : 'Add banner'}</button>
           {user.cover && <button className="btn ghost sm" onClick={async () => apply(await api('/users/me/cover', { method: 'DELETE' }))}>Remove</button>}
         </div>
       </div>
-      <input ref={coverRef} type="file" accept="image/*" hidden onChange={(e) => { e.target.files[0] && uploadCover(e.target.files[0]); e.target.value = ''; }} />
+      <p className="small muted" style={{ margin: '6px 0 0' }}>Shown across the top of your profile. You can crop and position it after choosing.</p>
+      <input ref={coverRef} type="file" accept="image/*" hidden onChange={pickPhoto('cover')} />
       <label className="label">Profile picture</label>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginTop: 8 }}>
-        <Avatar user={user} size={96} />
+        <button type="button" className="ep-avatar-edit" onClick={() => ref.current.click()} aria-label="Change profile picture">
+          <Avatar user={user} size={96} />
+          <span className="badge-cam"><Icon name="camera" size={15} /></span>
+        </button>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn ghost sm" onClick={() => ref.current.click()}><Icon name="camera" size={16} /> Change photo</button>
           {user.avatar && <button className="btn ghost sm" onClick={async () => apply(await api('/users/me/avatar', { method: 'DELETE' }))}>Remove</button>}
         </div>
-        <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => { e.target.files[0] && upload(e.target.files[0]); e.target.value = ''; }} />
+        <input ref={ref} type="file" accept="image/*" hidden onChange={pickPhoto('avatar')} />
       </div>
+      {editing && (
+        <ImageEditor file={editing.file}
+          {...(editing.kind === 'avatar'
+            ? { title: 'Profile picture', round: true, aspects: [{ label: 'Square', value: 1 }], maxSize: 800 }
+            : { title: 'Banner', aspects: [{ label: 'Banner', value: 3 }], maxSize: 2400 })}
+          doneLabel="Save"
+          onCancel={() => setEditing(null)}
+          onDone={(f) => { const kind = editing.kind; setEditing(null); (kind === 'avatar' ? upload : uploadCover)(f); }} />
+      )}
       <label className="label">Full name</label>
       <input className="input" value={f.full_name} onChange={set('full_name')} maxLength={80} />
       <label className="label">Username</label>

@@ -5,6 +5,7 @@ import { h, fail, imageUpload, fileUrl, deleteStoredFiles, publicUser, friendIds
 import { notify } from '../notify.js';
 import { postMessage } from './chats.js';
 import { canAccessTeam, canManageTeam } from '../teams.js';
+import { forYou } from '../feed.js';
 
 // Work posts are visible to their team's members only; social posts follow profile privacy.
 const canSeePost = (p, viewerId, author) => (p.team_id ? canAccessTeam(viewerId, p.team_id) : canViewProfile(viewerId, author));
@@ -42,6 +43,12 @@ export const hydratePosts = (rows, viewerId) => rows.map((p) => hydratePost(p, v
 r.get('/posts/feed', h((req, res) => {
   const me = req.user.id;
   const tab = req.query.tab === 'friends' ? 'friends' : 'foryou';
+  // For You is ranked and shuffled per refresh: the app sends a new `seed` on each refresh and pages with `page`.
+  if (tab === 'foryou' && req.query.seed !== undefined) {
+    const { rows, next } = forYou(me, { seed: Number(req.query.seed) || 1, page: Math.max(0, Number(req.query.page) || 0) });
+    const reasons = new Map(rows.map((x) => [x.p.id, x.reason]));
+    return res.json({ posts: hydratePosts(rows.map((x) => x.p), me).map((p) => ({ ...p, reason: reasons.get(p.id) || null })), nextPage: next });
+  }
   const before = Number(req.query.before) || 1e15;
   const ids = [me, ...friendIds(me)];
   const ph = ids.map(() => '?').join(',');
