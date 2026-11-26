@@ -23,8 +23,16 @@ export const listTime = (iso) => {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-export function Avatar({ user, src, size = 40, online, onClick }) {
+export function Avatar({ user, src, size = 40, online, onClick, story }) {
   const url = src ?? user?.avatar;
+  // story: 'new' (unseen story, gradient ring) or 'seen' (gray ring).
+  if (story) {
+    return (
+      <div className={`story-ring ${story}`} style={{ width: size, height: size }} onClick={onClick} role={onClick ? 'button' : undefined} aria-label={onClick ? 'View story' : undefined}>
+        <Avatar user={user} src={src} size={size - 8} online={online} />
+      </div>
+    );
+  }
   return (
     <div className="avatar" style={{ width: size, height: size, cursor: onClick ? 'pointer' : undefined }} onClick={onClick}>
       {url ? <img src={url} alt="" /> : <Icon name="user" size={size * 0.62} stroke={1.5} />}

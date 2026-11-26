@@ -342,7 +342,9 @@ export default function ChatRoom() {
       {bg && <div className="chat-bg" style={{ backgroundImage: `url(${bg})` }} aria-hidden="true" />}
       <div className="chat-head">
         <button className="icon-btn" onClick={() => nav('/chats')} aria-label="Back"><Icon name="back" /></button>
-        {conv.team ? <TeamLogo team={conv.team} size={40} /> : <Avatar src={conv.avatar} size={40} online={conv.type === 'direct' && conv.other?.online} onClick={() => conv.type === 'direct' && nav(`/u/${conv.other.id}`)} />}
+        {conv.team ? <TeamLogo team={conv.team} size={40} /> : <Avatar src={conv.avatar} size={42} online={conv.type === 'direct' && conv.other?.online}
+          story={ctx?.stories ? (ctx.stories.allSeen ? 'seen' : 'new') : undefined}
+          onClick={() => (ctx?.stories ? setViewer({ groups: [ctx.stories] }) : conv.type === 'direct' && nav(`/u/${conv.other.id}`))} />}
         <div className="meta" onClick={() => nav(`/chats/${cid}/info`)} style={{ cursor: 'pointer' }}>
           <div className="title">{conv.team ? `#${conv.title}` : conv.title} <Streak n={conv.streak} /></div>
           <div className={`sub ${wm && !typingNames.length ? 'mood' : ''}`} style={typingNames.length ? { color: 'var(--primary)' } : undefined}>{sub}</div>

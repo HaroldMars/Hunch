@@ -1,57 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
-import { moodByKey } from '@shared/constants.js';
 import { api } from '../api.js';
 import { useApp } from '../store.jsx';
-import { Avatar, HeaderActions, MoodPicker, Spinner, Empty } from '../components/ui.jsx';
+import { Avatar, HeaderActions, Spinner, Empty } from '../components/ui.jsx';
 import { PostCard, Composer } from '../components/Post.jsx';
 import { StoryBar, StoryViewer } from '../components/Stories.jsx';
 import StoryComposer from '../components/StoryComposer.jsx';
 import WorkTab from './Work.jsx';
-
-function MoodCheckin() {
-  const { user, toast } = useApp();
-  const [today, setToday] = useState(undefined);
-  const [editing, setEditing] = useState(false);
-  const [pending, setPending] = useState(null);
-  const [note, setNote] = useState('');
-  useEffect(() => { api('/moods/today').then(setToday).catch(() => setToday(null)); }, []);
-  if (today === undefined) return null;
-  const save = async () => {
-    await api('/moods/checkin', { method: 'POST', body: { mood: pending, note } });
-    setToday({ mood: pending, note: note.trim() || null });
-    setEditing(false); setPending(null);
-    toast(`Mood logged: ${moodByKey(pending).emoji} ${moodByKey(pending).label}`, 'success');
-  };
-  const who = user.work_mode ? 'Friends and your Work Mode teammates see it.' : 'Friends see it on your profile.';
-  if (today && !editing) {
-    const m = moodByKey(today.mood);
-    return (
-      <div className="checkin" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 28 }}>{m.emoji}</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>You're feeling {m.label.toLowerCase()} today</div>
-          <div className="small muted">{today.note ? `“${today.note}”` : 'Thanks for checking in.'}</div>
-        </div>
-        <button className="link-btn small" onClick={() => { setEditing(true); setPending(today.mood); setNote(today.note || ''); }}>Change</button>
-      </div>
-    );
-  }
-  return (
-    <div className="checkin">
-      <h4>How are you feeling today?</h4>
-      <MoodPicker value={pending || today?.mood} onChange={(m) => m && setPending(m)} />
-      {pending && (
-        <div className="checkin-note">
-          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="Add a note (optional), e.g. Feeling productive today." onKeyDown={(e) => e.key === 'Enter' && save()} />
-          <button className="btn sm" onClick={save}>Share</button>
-        </div>
-      )}
-      {pending && <div className="small muted" style={{ marginTop: 6 }}><Icon name="lock" size={11} /> {who}</div>}
-    </div>
-  );
-}
 
 export default function Timeline() {
   const { user, settings } = useApp();
@@ -128,7 +84,6 @@ export default function Timeline() {
       </div>
       {tab === 'work' ? (hasWork ? <WorkTab initialView={workView} /> : null) : <>
       <StoryBar groups={stories} onOpen={(i) => setViewer(i)} onCreate={() => setCreating(true)} />
-      <MoodCheckin />
       {posts === null ? <Spinner /> : posts.length === 0 ? (
         <Empty icon="globe" title={tab === 'friends' ? 'No posts from friends yet' : 'Nothing here yet'}>
           {tab === 'friends' ? 'Add friends from the Connect tab to see their posts.' : 'Be the first to share something.'}
