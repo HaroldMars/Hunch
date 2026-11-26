@@ -200,3 +200,25 @@ export function TeamLogo({ team, size = 44 }) {
     ? <img className="team-logo" src={team.logo} alt="" style={{ width: size, height: size }} />
     : <span className="team-logo ph" style={{ width: size, height: size, fontSize: size * 0.36 }} aria-hidden="true">{initials}</span>;
 }
+
+/** Work mood beside the chat streak: only sent by the server for Work Mode teammates. */
+export function WorkMood({ mood, short = false }) {
+  if (!mood) return null;
+  return <span className="work-mood" title={`${mood.label}${mood.note ? `: ${mood.note}` : ''} · shared with your team`}>{mood.emoji}{short ? '' : ` ${mood.label}`}</span>;
+}
+
+/** Someone's current mood on their profile or chat info (friends and Work Mode teammates). */
+export function MoodCard({ mood, name }) {
+  if (!mood) return null;
+  const when = mood.day === new Date().toLocaleDateString('en-CA') ? 'Today' : 'Yesterday';
+  return (
+    <div className="mood-card">
+      <span className="mc-emoji">{mood.emoji}</span>
+      <span className="mc-text">
+        <small>{name ? `${name}’s current mood` : 'Current mood'} · {when}</small>
+        <b>{mood.label}</b>
+        {mood.note && <em>“{mood.note}”</em>}
+      </span>
+    </div>
+  );
+}

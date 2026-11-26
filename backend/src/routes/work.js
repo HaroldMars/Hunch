@@ -10,6 +10,7 @@ import { hydratePosts, hydratePost } from './posts.js';
 import { storyOut } from './stories.js';
 import { POSITIVE, LOW_ENERGY, NEGATIVE } from '../analytics.js';
 import { postMessage } from './chats.js';
+import { workMood, moodHistory } from '../moods.js';
 import {
   workTeams, memberRole, canAccessTeam, canManageTeam, isTeamOwner, canInvite, canPostInTeam, teamSettings, teamMemberIds, resolveTeam, teamRow,
   canAssignRoles, canEditSettings, canSeeAnalytics, canSchedule, canMonitor, canAnnounce, ROLE_RANK,
@@ -123,6 +124,8 @@ r.get('/work/context', h((req, res) => {
     canMonitor: canMonitor(req.user, t),
     canAnnounce: canAnnounce(req.user, t),
     canAnalytics: canSeeAnalytics(req.user, t),
+    canMood: canMonitor(req.user, t), // team mood dashboard: managers, team leaders and SMEs
+    workMode: !!get('SELECT work_mode FROM users WHERE id = ?', req.user.id)?.work_mode,
     canPost: canPostInTeam(req.user, t),
     canInvite: canInvite(req.user, t),
     settings: { members_can_post: !!s.members_can_post, members_can_invite: !!teamRow(t).members_can_invite },
@@ -226,7 +229,6 @@ r.post('/work/teams/:id/leave', h((req, res) => {
 r.get('/work/members', h((req, res) => {
   const t = team(req);
   const monitor = canMonitor(req.user, t);
-  const analytics = canSeeAnalytics(req.user, t);
   const owner = teamRow(t).owner_id;
   const today = localDay();
   const s = teamSettings(t);
@@ -239,12 +241,13 @@ r.get('/work/members', h((req, res) => {
       is_owner: m.user_id === owner,
       joined_at: m.joined_at,
       canPost: m.role !== 'agent' || m.user_id === owner || !!s.members_can_post,
-      // SMEs, team leaders and managers monitor activity; mood check-ins are for managers only.
+      // SMEs, team leaders and managers monitor activity.
       ...(monitor ? {
         last_active_at: get('SELECT last_active_at FROM users WHERE id = ?', m.user_id).last_active_at,
         active_days_7: get('SELECT COUNT(*) c FROM activity_days WHERE user_id = ? AND day > ?', m.user_id, addDays(today, -7)).c,
       } : {}),
-      ...(analytics ? { mood_today: get('SELECT mood FROM mood_logs WHERE user_id = ? AND day = ? ORDER BY id DESC LIMIT 1', m.user_id, today)?.mood || null } : {}),
+      // Current mood: visible to teammates when both have Work Mode on.
+      mood: workMood(req.user.id, m.user_id),
     };
   }).sort((a, b) => (b.is_owner - a.is_owner) || ROLE_RANK[b.team_role] - ROLE_RANK[a.team_role] || a.full_name.localeCompare(b.full_name)));
 }));
@@ -678,7 +681,8 @@ r.get('/work/analytics', h((req, res) => {
 // ---------- team mood analytics ----------
 const groupOf = (m) => (POSITIVE.includes(m) ? 'positive' : LOW_ENERGY.includes(m) ? 'low' : NEGATIVE.includes(m) ? 'negative' : 'positive');
 export function teamMood(t) {
-  const ids = teamMemberIds(t);
+  // Only members with Work Mode on take part in team mood tracking.
+  const ids = all("SELECT m.user_id id FROM team_members m JOIN users u ON u.id = m.user_id WHERE m.team_id = ? AND u.status = 'active' AND u.work_mode = 1", Number(t)).map((r2) => r2.id);
   const ph = ids.map(() => '?').join(',') || 'NULL';
   const today = localDay();
   const from = addDays(today, -6);
@@ -723,11 +727,19 @@ export function teamMood(t) {
     trend,
     direction: a === null || b === null ? 'steady' : a - b > 0.05 ? 'improving' : b - a > 0.05 ? 'declining' : 'steady',
     burnout,
+    // Each member's current mood and the moods before it (one per day, last 7 days).
+    people: ids.map((id) => {
+      const history = moodHistory(id, 7);
+      const cur = history[0] && history[0].day >= addDays(today, -1) ? history[0] : null;
+      const changes = history.reduce((n, h2, i) => n + (i > 0 && h2.key !== history[i - 1].key ? 1 : 0), 0);
+      return { user: publicUser(id), role: memberRole(id, t), current: cur, history: cur ? history.slice(1) : history, changes };
+    }).sort((x, y) => (y.current ? 1 : 0) - (x.current ? 1 : 0) || (y.current?.at || '').localeCompare(x.current?.at || '')),
+    optedOut: teamMemberIds(t).length - ids.length,
   };
 }
 r.get('/work/mood', h((req, res) => {
   const t = team(req);
-  if (!canSeeAnalytics(req.user, t)) fail(403, 'Team mood analytics are for managers and the team owner.');
+  if (!canMonitor(req.user, t)) fail(403, 'Team mood tracking is for managers, team leaders and SMEs.');
   res.json(teamMood(t));
 }));
 

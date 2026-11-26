@@ -1,118 +1,93 @@
-// Hunch sign-in and first-login onboarding, shared by the client app and the admin dashboard.
+// Hunch welcome, sign-in, sign-up and first-login onboarding, shared by the client app and the admin dashboard.
+// Deep-blue gradient, glass cards, large type, rounded fields: one design language across every auth screen.
 // Each app passes its own `api` helper and session callbacks.
 import { useEffect, useRef, useState } from 'react';
 import Logo from '../Logo.jsx';
 import Icon from '../Icon.jsx';
-import { INTERESTS } from '../constants.js';
+import { INTERESTS, isStaffRole } from '../constants.js';
 import './auth.css';
 
-const QUOTES = [
-  ['Your mood matters. Every feeling tells a story.', 'Hunch'],
-  ['Small check-ins build strong teams.', 'Hunch'],
-  ['It’s okay to not be okay. It’s better to say so.', 'Hunch'],
-  ['Kindness is contagious. Start the spread.', 'Hunch'],
-  ['Rest is productive too.', 'Hunch'],
-  ['Great teams notice each other.', 'Hunch'],
-  ['A good day starts with an honest feeling.', 'Hunch'],
-  ['Celebrate the small wins; they add up.', 'Hunch'],
-  ['Listening is the most underrated skill at work.', 'Hunch'],
-  ['Progress, not perfection.', 'Hunch'],
-  ['Your energy introduces you before you speak.', 'Hunch'],
-  ['Take the break. The queue will still be there.', 'Hunch'],
-  ['Connection turns colleagues into a team.', 'Hunch'],
-  ['Feelings are information, not weakness.', 'Hunch'],
-];
-const quoteOfTheDay = () => {
-  const d = new Date();
-  const day = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5);
-  return QUOTES[day % QUOTES.length];
-};
+const ORBIT = ['😊', '😎', '🤩', '⚡', '🧐', '😴'];
+const PEOPLE = [['#f5b971', '😊'], ['#8fb8ff', '😎'], ['#c4a4ff', '🤩'], ['#7ee0c3', '⚡']];
 
-// Minimal line-art mood faces (Happy, Focused, Excited, Calm).
-function MoodFace({ kind, size = 40 }) {
-  const common = { fill: 'none', stroke: '#fff', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round' };
-  const faces = {
-    happy: <><circle cx="15" cy="17" r="1.6" fill="#fff" stroke="none" /><circle cx="25" cy="17" r="1.6" fill="#fff" stroke="none" /><path d="M13 23.5c1.8 3 4.2 4.4 7 4.4s5.2-1.4 7-4.4" {...common} /></>,
-    focused: <><path d="M12.5 16.5h5M22.5 16.5h5" {...common} /><path d="M12 13l5 1.5M28 13l-5 1.5" {...common} strokeWidth={1.6} /><path d="M16 26h8" {...common} /></>,
-    excited: <><path d="M12.5 17.5l2.5-3 2.5 3M22.5 17.5l2.5-3 2.5 3" {...common} /><path d="M14 22.5h12c0 4-2.7 6.3-6 6.3s-6-2.3-6-6.3z" {...common} fill="rgba(255,255,255,.25)" /><path d="M32 6l.8 2.2L35 9l-2.2.8L32 12l-.8-2.2L29 9l2.2-.8z" fill="#fff" stroke="none" /></>,
-    calm: <><path d="M12.5 17c1.2 1.4 3.8 1.4 5 0M22.5 17c1.2 1.4 3.8 1.4 5 0" {...common} /><path d="M15.5 25c1.4 1.2 2.9 1.8 4.5 1.8s3.1-.6 4.5-1.8" {...common} /></>,
-  };
+/** The glowing mood planet with emoji moods on its orbit. */
+function Planet({ size = 'lg' }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="17" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.55)" strokeWidth="1.5" />
-      {faces[kind]}
-    </svg>
-  );
-}
-
-function CommunityMood({ api }) {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    const load = () => api('/auth/community-mood').then(setData).catch(() => {});
-    load();
-    const t = setInterval(load, 60e3);
-    return () => clearInterval(t);
-  }, [api]);
-  return (
-    <div className="hx-glass" aria-live="polite">
-      <h4><span className="hx-live" /> {data?.period === 'week' ? 'This week’s community mood' : 'Today’s community mood'}</h4>
-      {!data ? <div style={{ opacity: 0.7, fontSize: 13 }}>Loading…</div> : !data.top.length ? <div style={{ opacity: 0.8, fontSize: 13 }}>No check-ins yet today. Be the first!</div> : data.top.map((m) => (
-        <div key={m.mood} className="hx-mood-row">
-          <span>{m.emoji}</span><span>{m.label}</span><b>{m.pct}%</b>
-          <div className="bar"><i style={{ width: `${m.pct}%` }} /></div>
-        </div>
-      ))}
+    <div className={`hx-planet ${size}`} aria-hidden="true">
+      <span className="glow" />
+      <span className="orb"><i className="c1" /><i className="c2" /><i className="c3" /></span>
+      <span className="ring" />
+      {ORBIT.map((e, i) => <b key={e} className={`moon m${i}`}>{e}</b>)}
     </div>
   );
 }
 
-export function AuthShell({ api, children }) {
-  const [quote, by] = quoteOfTheDay();
-  const floaters = [
-    ['heart', '64%', '10%', 0], ['chat', '84%', '22%', -2], ['sparkle', '88%', '50%', -4], ['star', '56%', '46%', -6], ['users', '74%', '34%', -3], ['smile', '90%', '76%', -5],
-  ];
+function Brand({ small }) {
+  return <div className={`hx-logo ${small ? 'sm' : ''}`}><Logo size={small ? 22 : 26} color="#fff" /> Hunch</div>;
+}
+
+/** Background and layout for every auth screen. On wide screens a hero sits beside the card. */
+export function AuthShell({ children, hero = true }) {
   return (
     <div className="hx-auth">
-      <section className="hx-brand" aria-label="About Hunch">
-        <span className="hx-blob b1" /><span className="hx-blob b2" /><span className="hx-blob b3" />
-        <div className="hx-floaters">
-          {floaters.map(([n, left, top, delay]) => <span key={n} style={{ left, top, animationDelay: `${delay}s` }}><Icon name={n} size={18} /></span>)}
-        </div>
-        <div className="hx-brand-top"><Logo size={30} color="#fff" /> HUNCH</div>
-        <div className="hx-hero">
-          <h1>HUNCH</h1>
-          <p className="tag">Connect. Share. Express.</p>
-          <ul>
-            <li><i><Icon name="chart" size={15} /></i> Track your moods.</li>
-            <li><i><Icon name="users" size={15} /></i> Connect with friends.</li>
-            <li><i><Icon name="heart" size={15} /></i> Build meaningful interactions.</li>
-          </ul>
-        </div>
-        <div className="hx-moods" aria-hidden="true">
-          {[['happy', 'Happy'], ['focused', 'Focused'], ['excited', 'Excited'], ['calm', 'Calm']].map(([k, l]) => (
-            <div key={k} className="hx-mood-card"><MoodFace kind={k} />{l}</div>
-          ))}
-        </div>
-        <div className="hx-extras">
-          <CommunityMood api={api} />
-          <div className="hx-glass"><h4><Icon name="sparkle" size={13} /> Quote of the day</h4><p className="hx-quote">“{quote}”<small>{by}</small></p></div>
-        </div>
-      </section>
-      <main className="hx-side"><div className="hx-mobile-logo"><Logo size={50} color="#fff" /></div>{children}</main>
+      <span className="hx-glow g1" /><span className="hx-glow g2" /><span className="hx-glow g3" />
+      <span className="hx-stars" />
+      <div className={`hx-layout ${hero ? 'with-hero' : ''}`}>
+        {hero && (
+          <section className="hx-hero" aria-label="About Hunch">
+            <Brand />
+            <Planet />
+            <div className="hx-hero-text">
+              <p className="kicker">Connect · Express · Belong</p>
+              <h1>Share <em>moments</em>,<br />feel together.</h1>
+              <p className="lede">Share moments. Track moods. Build meaningful connections.</p>
+            </div>
+          </section>
+        )}
+        <main className="hx-side">{children}</main>
+      </div>
     </div>
   );
 }
 
-export function Field({ label, type = 'text', value, onChange, error, autoComplete, autoFocus, inputMode, maxLength, className, textarea, toggle }) {
+/** First screen of the Hunch app for people who aren't signed in. */
+export function WelcomeScreen({ onStart, onSignIn }) {
+  return (
+    <div className="hx-auth">
+      <span className="hx-glow g1" /><span className="hx-glow g2" /><span className="hx-glow g3" />
+      <span className="hx-stars" />
+      <div className="hx-welcome">
+        <Brand />
+        <Planet />
+        <div className="hx-welcome-text">
+          <p className="kicker">Connect · Express · Belong</p>
+          <h1>Share <em>moments</em>.<br />Feel together.</h1>
+          <p className="lede">Share moments. Track moods. Build meaningful connections.</p>
+          <div className="hx-people">
+            <span className="faces">{PEOPLE.map(([c, e]) => <i key={e} style={{ background: c }}>{e}</i>)}</span>
+            <span>Friends sharing how they feel, every day</span>
+          </div>
+        </div>
+        <div className="hx-welcome-actions">
+          <button className="hx-btn" onClick={onStart}>Get Started <Icon name="next" size={18} /></button>
+          <p className="hx-foot" style={{ margin: '14px 0 0' }}>Already have an account? <button type="button" className="hx-link" onClick={onSignIn}>Sign In</button></p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Field({ label, type = 'text', value, onChange, error, autoComplete, autoFocus, inputMode, maxLength, className, textarea, toggle, icon }) {
   const [show, setShow] = useState(false);
   const id = useRef(`hx-${Math.random().toString(36).slice(2)}`).current;
   const Tag = textarea ? 'textarea' : 'input';
   return (
-    <div className={`hx-field ${error ? 'invalid' : ''}`}>
+    <div className={`hx-field ${error ? 'invalid' : ''} ${icon ? 'has-icon' : ''}`}>
       <Tag id={id} type={toggle ? (show ? 'text' : 'password') : type} value={value} placeholder=" " onChange={(e) => onChange(e.target.value)}
         autoComplete={autoComplete} autoFocus={autoFocus} inputMode={inputMode} maxLength={maxLength} className={className}
         aria-invalid={!!error} aria-describedby={error ? `${id}-err` : undefined} />
       <label htmlFor={id}>{label}</label>
+      {icon && <span className="fi"><Icon name={icon} size={18} /></span>}
       {toggle && (
         <button type="button" className="eye" onClick={() => setShow(!show)} aria-label={show ? 'Hide password' : 'Show password'}>
           <Icon name={show ? 'eyeOff' : 'eye'} size={19} />
@@ -139,17 +114,17 @@ const GoogleG = () => (
 );
 
 /**
- * Sign-in card. `appKind` is this app ('client' | 'admin'). Everyone stays in the app they signed in to.
+ * Sign-in / sign-up card. `appKind` is this app ('client' | 'admin'). Everyone stays in the app they signed in to.
  * The Admin Dashboard is staff-only: anyone else signing in there is sent to the Hunch app.
- * `allowSignup` (Hunch app) adds Create Account: email + password, or Continue with Google.
+ * `allowSignup` (Hunch app) adds Create Account: name, email and password, or Continue with Google.
+ * `onBack` (Hunch app) returns to the Welcome screen.
  */
-export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: settingsIn, allowSignup = false, initialMode = 'login' }) {
+export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: settingsIn, allowSignup = false, initialMode = 'login', onModeChange, onBack }) {
   const settings = settingsIn || {}; // never crash if the server couldn't be reached
   const [mode, setMode] = useState(allowSignup ? initialMode : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
   const [remember, setRemember] = useState(true);
   const [errors, setErrors] = useState({});
   const [alert, setAlert] = useState(null);
@@ -157,6 +132,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
   const [redirecting, setRedirecting] = useState(null);
   const [shake, doShake] = useShake();
   const googleRef = useRef(null);
+  const google = mode !== 'forgot' && (allowSignup || mode === 'login');
 
   const finish = (res, rem) => {
     if (res.app === appKind) return onSession(res, rem);
@@ -164,9 +140,9 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     setTimeout(() => { window.location.href = `${otherAppUrl}#handoff=${encodeURIComponent(res.token)}&r=${rem ? 1 : 0}`; }, 700);
   };
 
-  // Real Google Identity Services button when the server has a client id configured.
+  // Google Identity Services button (photo, name and email come from Google) when the server has a client id.
   useEffect(() => {
-    if (!settings.google_client_id || mode === 'forgot') return;
+    if (!settings.google_client_id || !google) return;
     const init = () => {
       window.google.accounts.id.initialize({
         client_id: settings.google_client_id,
@@ -175,7 +151,11 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
           try { finish(await api('/auth/google', { method: 'POST', body: { credential, remember, app: appKind } }), remember); } catch (e) { setAlert({ type: 'error', text: e.message }); doShake(); } finally { setBusy(false); }
         },
       });
-      if (googleRef.current) window.google.accounts.id.renderButton(googleRef.current, { theme: 'outline', size: 'large', width: 356, text: mode === 'signup' ? 'signup_with' : 'continue_with', shape: 'pill' });
+      if (googleRef.current) {
+        const width = Math.min(400, Math.max(220, googleRef.current.offsetWidth || 340));
+        googleRef.current.innerHTML = '';
+        window.google.accounts.id.renderButton(googleRef.current, { theme: 'filled_black', size: 'large', width, text: mode === 'signup' ? 'signup_with' : 'continue_with', shape: 'pill', logo_alignment: 'center' });
+      }
     };
     if (window.google?.accounts) return init();
     const s = document.createElement('script');
@@ -191,9 +171,8 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     else if (email.includes('@') && !/^\S+@\S+\.\S+$/.test(email.trim())) e.email = 'That email address doesn’t look right.';
     if (mode === 'login' && !password) e.password = 'Enter your password.';
     if (mode === 'signup') {
-      if (!fullName.trim()) e.fullName = 'Enter your name.';
+      if (!fullName.trim()) e.fullName = 'Enter your full name.';
       if (!/^\S+@\S+\.\S+$/.test(email.trim())) e.email = 'Enter a valid email address.';
-      if (!/^[a-z0-9._]{3,30}$/i.test(username.trim().replace(/^@/, ''))) e.username = '3–30 letters, numbers, dots or underscores.';
       if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) e.password = 'Use 8+ characters with letters and numbers.';
     }
     setErrors(e);
@@ -211,7 +190,7 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
         const r = await api('/auth/forgot', { method: 'POST', body: { identifier: email.trim() } });
         setAlert({ type: 'success', text: r.message });
       } else if (mode === 'signup') {
-        finish(await api('/auth/signup', { method: 'POST', body: { full_name: fullName.trim(), email: email.trim(), username: username.trim().replace(/^@/, ''), password, remember } }), remember);
+        finish(await api('/auth/signup', { method: 'POST', body: { full_name: fullName.trim(), email: email.trim(), password, remember } }), remember);
       } else {
         finish(await api('/auth/login', { method: 'POST', body: { identifier: email.trim(), password, remember, app: appKind } }), remember);
       }
@@ -222,64 +201,61 @@ export function LoginScreen({ api, appKind, otherAppUrl, onSession, settings: se
     } finally { setBusy(false); }
   };
 
-  const switchMode = (m) => { setMode(m); setAlert(null); setErrors({}); };
+  const switchMode = (m) => { setMode(m); setAlert(null); setErrors({}); onModeChange?.(m); };
 
   if (redirecting) {
     return (
-      <AuthShell api={api}>
-        <div className="hx-card"><div className="hx-redirect"><div className="hx-spin" /><h2 style={{ fontSize: 22 }}>Welcome back!</h2><p className="sub" style={{ margin: '8px 0 0' }}>Taking you to the {redirecting}…</p></div></div>
+      <AuthShell>
+        <div className="hx-card"><div className="hx-redirect"><div className="hx-spin" /><h2>Welcome back!</h2><p className="sub" style={{ margin: '8px 0 0' }}>Taking you to the {redirecting}…</p></div></div>
       </AuthShell>
     );
   }
 
+  const title = mode === 'login' ? 'Welcome Back' : mode === 'signup' ? 'Create Account' : 'Reset password';
+  const sub = mode === 'login' ? (allowSignup ? 'Sign in to continue' : 'Sign in to the Admin Dashboard') : mode === 'signup' ? 'Join Hunch to share moments and moods with friends.' : 'Enter your account email. An administrator will be notified to issue you a temporary password.';
   return (
-    <AuthShell api={api}>
+    <AuthShell>
       <form className={`hx-card ${shake ? 'shake' : ''}`} onSubmit={submit} noValidate>
-        
-        <h2>{mode === 'login' ? 'Welcome Back' : mode === 'signup' ? 'Create Account' : 'Reset password'}</h2>
-        <p className="sub">{mode === 'login' ? 'Sign in to continue your journey.' : mode === 'signup' ? 'Join Hunch: share moods, stories and moments with friends.' : 'Enter your account email. An administrator will be notified to issue you a temporary password.'}</p>
+        <div className="hx-card-top">
+          {onBack ? <button type="button" className="hx-back" onClick={onBack} aria-label="Back"><Icon name="back" size={20} /></button> : <span />}
+          <Brand small />
+          <span />
+        </div>
+        <h2>{title}</h2>
+        <p className="sub">{sub}</p>
         {settings.maintenance_banner && mode === 'login' && <div className="hx-alert info"><Icon name="megaphone" size={17} /> {settings.maintenance_banner}</div>}
         {alert && <div className={`hx-alert ${alert.type}`} role="alert"><Icon name={alert.type === 'error' ? 'close' : 'check'} size={17} /> {alert.text}</div>}
-        {mode === 'signup' && <Field label="Full Name" value={fullName} onChange={(v) => { setFullName(v); setErrors({ ...errors, fullName: null }); }} error={errors.fullName} autoComplete="name" autoFocus maxLength={80} />}
-        <Field label="Email Address" type="email" value={email} onChange={(v) => { setEmail(v); setErrors({ ...errors, email: null }); }} error={errors.email} autoComplete={mode === 'signup' ? 'email' : 'username'} autoFocus={mode !== 'signup'} />
-        {mode === 'signup' && (
+        {google && (
           <>
-            <Field label="Username" value={username} onChange={(v) => { setUsername(v.replace(/\s/g, '')); setErrors({ ...errors, username: null }); }} error={errors.username} autoComplete="username" maxLength={31} />
-            <Field label="Password" value={password} toggle onChange={(v) => { setPassword(v); setErrors({ ...errors, password: null }); }} error={errors.password} autoComplete="new-password" />
-          </>
-        )}
-        {mode === 'login' && (
-          <>
-            <Field label="Password" value={password} toggle onChange={(v) => { setPassword(v); setErrors({ ...errors, password: null }); }} error={errors.password?.trim()} autoComplete="current-password" />
-            <div className="hx-row">
-              <label className="hx-check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember me</label>
-            </div>
-          </>
-        )}
-        <button className="hx-btn" disabled={busy}>
-          {busy ? <><span className="hx-spin" /> {mode === 'login' ? 'Signing In...' : mode === 'signup' ? 'Creating account...' : 'Sending...'}</> : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send reset request'}
-        </button>
-        {mode !== 'signup' && (
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button type="button" className="hx-link" onClick={() => switchMode(mode === 'login' ? 'forgot' : 'login')}>
-              {mode === 'login' ? 'Forgot Password?' : 'Back to sign in'}
-            </button>
-          </div>
-        )}
-        {mode !== 'forgot' && (allowSignup || mode === 'login') && (
-          <>
-            <div className="hx-or">OR</div>
-            {settings.google_client_id ? <div ref={googleRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} /> : (
-              <button type="button" className="hx-btn ghost" onClick={() => setAlert({ type: 'info', text: 'Google sign-in isn’t enabled on this server yet. Ask your administrator, or sign in with your email and password.' })}>
+            {settings.google_client_id ? <div ref={googleRef} className="hx-google" /> : (
+              <button type="button" className="hx-btn glass" onClick={() => setAlert({ type: 'info', text: 'Google sign-in isn’t enabled on this server yet. Use your email and password for now.' })}>
                 <GoogleG /> Continue with Google
               </button>
             )}
+            <div className="hx-or">OR</div>
           </>
         )}
+        {mode === 'signup' && <Field label="Full Name" icon="user" value={fullName} onChange={(v) => { setFullName(v); setErrors({ ...errors, fullName: null }); }} error={errors.fullName} autoComplete="name" maxLength={80} />}
+        <Field label="Email Address" icon="mail" type="email" value={email} onChange={(v) => { setEmail(v); setErrors({ ...errors, email: null }); }} error={errors.email} autoComplete={mode === 'signup' ? 'email' : 'username'} />
+        {mode !== 'forgot' && (
+          <Field label="Password" icon="lock" value={password} toggle onChange={(v) => { setPassword(v); setErrors({ ...errors, password: null }); }}
+            error={mode === 'login' ? errors.password?.trim() : errors.password} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+        )}
+        {mode === 'login' && (
+          <div className="hx-row">
+            <label className="hx-check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember me</label>
+            <button type="button" className="hx-link" onClick={() => switchMode('forgot')}>Forgot Password?</button>
+          </div>
+        )}
+        {mode === 'signup' && <div className="hx-hint ok" style={{ marginTop: -4, marginBottom: 10 }}>8+ characters with letters and numbers. You’ll pick a username next.</div>}
+        <button className="hx-btn" disabled={busy}>
+          {busy ? <><span className="hx-spin" /> {mode === 'login' ? 'Signing In...' : mode === 'signup' ? 'Creating account...' : 'Sending...'}</> : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send reset request'}
+        </button>
         <p className="hx-foot">
-          {!allowSignup ? <>Hunch staff only.<br />Staff accounts are created by a system administrator.</>
-            : mode === 'signup' ? <>Already have an account? <button type="button" className="hx-link" style={{ fontWeight: 700 }} onClick={() => switchMode('login')}>Sign in</button></>
-              : <>Don’t have an account? <button type="button" className="hx-link" style={{ fontWeight: 700 }} onClick={() => switchMode('signup')}>Create account</button></>}
+          {mode === 'forgot' ? <button type="button" className="hx-link" onClick={() => switchMode('login')}>Back to Sign In</button>
+            : !allowSignup ? <>Hunch staff only. Staff accounts are created by a system administrator.</>
+              : mode === 'signup' ? <>Already have an account? <button type="button" className="hx-link" onClick={() => switchMode('login')}>Sign In</button></>
+                : <>Don’t have an account? <button type="button" className="hx-link" onClick={() => switchMode('signup')}>Sign Up</button></>}
         </p>
       </form>
     </AuthShell>
@@ -314,9 +290,9 @@ export function Onboarding({ api, session, setSession, logout }) {
   };
 
   return (
-    <AuthShell api={api}>
+    <AuthShell>
       <div className={`hx-card ${shake ? 'shake' : ''}`}>
-        
+        <div className="hx-card-top"><span /><Brand small /><span /></div>
         <div className="hx-steps" aria-label={`Step ${idx + 1} of ${steps.length}`}>
           {steps.map(([k, l], i) => <div key={k} className={i < idx ? 'done' : i === idx ? 'on' : ''}><i><b /></i><span>{i + 1}. {l}</span></div>)}
         </div>
@@ -378,6 +354,8 @@ function ProfileStep({ api, user, busy, run }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(user.avatar || '');
   const [check, setCheck] = useState(null); // live username availability
+  const [workMode, setWorkMode] = useState(!!user.work_mode);
+  const member = !isStaffRole(user.role);
   const ref = useRef();
   useEffect(() => {
     if (!file) return undefined;
@@ -398,6 +376,7 @@ function ProfileStep({ api, user, busy, run }) {
     const form = new FormData();
     Object.entries(f).forEach(([k, v]) => form.append(k, k === 'username' ? v.trim().replace(/^@/, '') : v));
     form.append('interests', JSON.stringify(interests));
+    if (member) form.append('work_mode', workMode ? '1' : '0');
     if (file) form.append('avatar', file);
     run(() => api('/auth/complete-profile', { method: 'POST', form }));
   };
@@ -405,8 +384,8 @@ function ProfileStep({ api, user, busy, run }) {
   const usernameError = check && !check.ok ? (check.reason === 'Taken' ? 'That username is taken.' : check.reason) : null;
   return (
     <form onSubmit={submit}>
-      <h2>Complete your profile</h2>
-      <p className="sub">Pick a username and tell people a little about you. You can change this anytime.</p>
+      <h2>Set up your profile</h2>
+      <p className="sub">Choose your username, photo and interests. You can change these anytime.</p>
       <div className="hx-avatar-pick">
         <div className="av">{preview ? <img src={preview} alt="" referrerPolicy="no-referrer" /> : initials}</div>
         <div>
@@ -424,6 +403,14 @@ function ProfileStep({ api, user, busy, run }) {
           {INTERESTS.map((x) => <button key={x} type="button" className={interests.includes(x) ? 'on' : ''} aria-pressed={interests.includes(x)} onClick={() => toggle(x)}>{x}</button>)}
         </div>
       </div>
+      {member && (
+        <label className="hx-toggle">
+          <span className="ic"><Icon name="briefcase" size={18} /></span>
+          <span className="tx"><b>Enable Work Mode <small>Optional</small></b><small>Create or join private teams with schedules, team chat and team moods. You can turn it on or off in Settings.</small></span>
+          <input type="checkbox" checked={workMode} onChange={(e) => setWorkMode(e.target.checked)} />
+          <i aria-hidden="true" />
+        </label>
+      )}
       <button className="hx-btn" disabled={busy || !f.full_name.trim() || !f.username.trim() || !!usernameError}>{busy ? <><span className="hx-spin" /> Saving...</> : 'Finish & enter Hunch'}</button>
     </form>
   );

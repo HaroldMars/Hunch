@@ -4,7 +4,7 @@ import Icon from '@shared/Icon.jsx';
 import { ROLE_LABELS, INTERESTS, TEAM_ROLE_LABELS, isStaffRole, moodByKey, themeCss } from '@shared/constants.js';
 import { api, toForm } from '../api.js';
 import { useApp } from '../store.jsx';
-import { Avatar, TopBar, Spinner, Empty, Sheet, Confirm, useLoad } from '../components/ui.jsx';
+import { Avatar, TopBar, Spinner, Empty, Sheet, Confirm, MoodCard, useLoad } from '../components/ui.jsx';
 import { PostCard, Composer } from '../components/Post.jsx';
 import { StoryViewer, AddToHighlight } from '../components/Stories.jsx';
 import { FriendButton } from './Connect.jsx';
@@ -148,6 +148,7 @@ export default function Profile() {
           <span className="chip"><Icon name={p.privacy === 'public' ? 'globe' : 'lock'} size={13} /> {p.privacy === 'public' ? 'Public' : 'Friends only'}</span>
         </div>
         {p.bio && <p className="bio">{p.bio}</p>}
+        {p.relation !== 'self' && <MoodCard mood={p.current_mood} name={p.full_name.split(' ')[0]} />}
         <div className="profile-stats">
           <div><b>{p.counts.posts}</b><span>Posts</span></div>
           <div><b>{p.counts.reposts}</b><span>Reposts</span></div>

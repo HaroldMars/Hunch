@@ -708,6 +708,7 @@ if (getSetting('platform_v2') !== '1') {
 // ---------- v1.0: team structure, scheduling and projects ----------
 // Team roles are now Manager / Team Leader / SME / Agent (the owner is teams.owner_id and also holds one of them).
 // Every team has the five standard channels, schedules carry a break, and teams can track projects.
+addColumn('mood_logs', 'note', 'TEXT'); // optional status with a check-in, e.g. "Feeling productive today."
 addColumn('schedules', 'break_start', 'TEXT');
 addColumn('schedules', 'break_end', 'TEXT');
 db.exec(`

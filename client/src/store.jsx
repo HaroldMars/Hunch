@@ -83,7 +83,9 @@ export function AppProvider({ children }) {
     const s = io(API_BASE || undefined, { auth: { token: getToken() }, transports: ['websocket', 'polling'] });
     socketRef.current = s;
     const relay = (event) => (data) => (listeners.current.get(event) || new Set()).forEach((fn) => fn(data));
-    ['message:new', 'message:update', 'message:read', 'typing', 'notification:new', 'conversation:update'].forEach((ev) => s.on(ev, relay(ev)));
+    ['message:new', 'message:update', 'message:read', 'typing', 'notification:new', 'conversation:update', 'mood:update',
+      'call:ring', 'call:ended', 'call:peer-joined', 'call:peer-left', 'call:left', 'call:signal', 'call:declined', 'call:answered-elsewhere', 'call:media',
+    ].forEach((ev) => s.on(ev, relay(ev)));
     s.on('notification:new', refreshUnread);
     refreshUnread();
     return () => s.disconnect();
@@ -94,7 +96,8 @@ export function AppProvider({ children }) {
     listeners.current.get(event).add(fn);
     return () => listeners.current.get(event).delete(fn);
   }, []);
-  const emit = useCallback((event, data) => socketRef.current?.emit(event, data), []);
+  // `ack` (optional) receives the server's reply, for request/response events like starting a call.
+  const emit = useCallback((event, data, ack) => (ack ? socketRef.current?.emit(event, data, ack) : socketRef.current?.emit(event, data)), []);
 
   const value = useMemo(() => ({
     session, setSession, user: session?.user, booting, ready, login, logout, refreshMe,

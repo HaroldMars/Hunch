@@ -11,32 +11,44 @@ import StoryComposer from '../components/StoryComposer.jsx';
 import WorkTab from './Work.jsx';
 
 function MoodCheckin() {
-  const { toast } = useApp();
+  const { user, toast } = useApp();
   const [today, setToday] = useState(undefined);
   const [editing, setEditing] = useState(false);
+  const [pending, setPending] = useState(null);
+  const [note, setNote] = useState('');
   useEffect(() => { api('/moods/today').then(setToday).catch(() => setToday(null)); }, []);
   if (today === undefined) return null;
-  const pick = async (mood) => {
-    if (!mood) return;
-    await api('/moods/checkin', { method: 'POST', body: { mood } });
-    setToday({ mood });
-    setEditing(false);
-    toast(`Mood logged: ${moodByKey(mood).emoji} ${moodByKey(mood).label}`, 'success');
+  const save = async () => {
+    await api('/moods/checkin', { method: 'POST', body: { mood: pending, note } });
+    setToday({ mood: pending, note: note.trim() || null });
+    setEditing(false); setPending(null);
+    toast(`Mood logged: ${moodByKey(pending).emoji} ${moodByKey(pending).label}`, 'success');
   };
+  const who = user.work_mode ? 'Friends and your Work Mode teammates see it.' : 'Friends see it on your profile.';
   if (today && !editing) {
     const m = moodByKey(today.mood);
     return (
       <div className="checkin" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontSize: 28 }}>{m.emoji}</span>
-        <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>You're feeling {m.label.toLowerCase()} today</div><div className="small muted">Thanks for checking in.</div></div>
-        <button className="link-btn small" onClick={() => setEditing(true)}>Change</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>You're feeling {m.label.toLowerCase()} today</div>
+          <div className="small muted">{today.note ? `“${today.note}”` : 'Thanks for checking in.'}</div>
+        </div>
+        <button className="link-btn small" onClick={() => { setEditing(true); setPending(today.mood); setNote(today.note || ''); }}>Change</button>
       </div>
     );
   }
   return (
     <div className="checkin">
       <h4>How are you feeling today?</h4>
-      <MoodPicker value={today?.mood} onChange={pick} />
+      <MoodPicker value={pending || today?.mood} onChange={(m) => m && setPending(m)} />
+      {pending && (
+        <div className="checkin-note">
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="Add a note (optional), e.g. Feeling productive today." onKeyDown={(e) => e.key === 'Enter' && save()} />
+          <button className="btn sm" onClick={save}>Share</button>
+        </div>
+      )}
+      {pending && <div className="small muted" style={{ marginTop: 6 }}><Icon name="lock" size={11} /> {who}</div>}
     </div>
   );
 }

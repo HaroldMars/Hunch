@@ -4,8 +4,116 @@ import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
 import { useApp, useSocket } from '../store.jsx';
 import { moodByKey, themeCss } from '@shared/constants.js';
-import { Avatar, TeamLogo, Sheet, Spinner, Empty, Lightbox, clockTime, useLoad, FilePreviews } from '../components/ui.jsx';
+import { Avatar, TeamLogo, Sheet, Spinner, Empty, Lightbox, WorkMood, clockTime, useLoad, FilePreviews } from '../components/ui.jsx';
 import { Streak } from './Chats.jsx';
+import { ScheduleForm, WorkComposer } from './Work.jsx';
+import { StoryViewer } from '../components/Stories.jsx';
+import { startCall } from '../components/Calls.jsx';
+import { span as schedSpan, parseDay } from '@shared/work/WorkWidgets.jsx';
+
+const TAB_ICON = { general: 'chat', announcements: 'megaphone', schedules: 'clock', meetings: 'users', projects: 'layers' };
+const whenDay = (d) => {
+  const t = new Date(); const ymd = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  const tm = new Date(t); tm.setDate(t.getDate() + 1);
+  return d === ymd(t) ? 'Today' : d === ymd(tm) ? 'Tomorrow' : parseDay(d).toLocaleDateString(undefined, { weekday: 'long' });
+};
+
+/** Mutual friends, shared team and location stories, under the name in a personal chat. */
+function ContextBar({ ctx, onMedia, mediaOpen, onPlaces }) {
+  const nav = useNavigate();
+  if (!ctx) return null;
+  const places = ctx.locationStories?.places || [];
+  const storyCount = places.reduce((n, p) => n + p.count, 0);
+  const media = ctx.stats.photos + ctx.stats.files + ctx.stats.links;
+  const chips = [
+    ctx.mutuals?.count > 0 && (
+      <span key="m" className="cx-chip"><span className="cx-faces">{ctx.mutuals.users.map((u) => <Avatar key={u.id} user={u} size={18} />)}</span>{ctx.mutuals.count} mutual</span>
+    ),
+    ...(ctx.sharedTeams || []).map((t) => (
+      <button key={`t${t.id}`} className="cx-chip work" onClick={() => nav('/?tab=work')}><TeamLogo team={t} size={18} />{t.name} · {t.role_label}</button>
+    )),
+    storyCount > 0 && <button key="l" className="cx-chip" onClick={onPlaces}><Icon name="location" size={14} />{storyCount} location {storyCount === 1 ? 'story' : 'stories'}</button>,
+    media > 0 && <button key="p" className={`cx-chip ${mediaOpen ? 'on' : ''}`} onClick={onMedia}><Icon name="image" size={14} />{media} shared</button>,
+  ].filter(Boolean);
+  if (!chips.length) return null;
+  return <div className="cx-bar">{chips}</div>;
+}
+
+/** Recent photos, videos, links and files, scrollable under the header. */
+function MediaStrip({ cid, onImage }) {
+  const [kind, setKind] = useState('photos');
+  const { data } = useLoad(() => api(`/conversations/${cid}/media?kind=${kind}`), [cid, kind]);
+  return (
+    <div className="media-strip">
+      <div className="ms-tabs">{[['photos', 'Photos'], ['videos', 'Videos'], ['links', 'Links'], ['files', 'Files']].map(([k, l]) => <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{l}</button>)}</div>
+      <div className="ms-row">
+        {!data ? <Spinner /> : !data.length ? <span className="ms-none">No {kind} yet</span> : kind === 'photos' ? data.slice(0, 30).map((x) => <img key={x.id} src={x.image} alt="" onClick={() => onImage(x.image)} />)
+          : kind === 'videos' ? data.slice(0, 20).map((x) => <video key={x.id} src={x.attachment.url} preload="metadata" controls />)
+            : data.slice(0, 20).map((x, i) => (
+              <a key={`${x.id}-${i}`} className="ms-file" href={kind === 'links' ? x.url : x.attachment.url} target="_blank" rel="noreferrer noopener" download={kind === 'files' ? x.attachment.name : undefined}>
+                <Icon name={kind === 'links' ? 'link' : 'file'} size={16} /><span>{kind === 'links' ? x.url.replace(/^https?:\/\//, '') : x.attachment.name}</span>
+              </a>
+            ))}
+      </div>
+    </div>
+  );
+}
+
+/** Team channel: tabs for the team's channels and files, your next shift, and the team's current mood. */
+function TeamBar({ ctx, cid, onFiles, onMood, moodOpen }) {
+  const nav = useNavigate();
+  if (!ctx?.team) return null;
+  const s = ctx.schedule?.shift;
+  const m = ctx.schedule?.meeting;
+  const tm = ctx.teamMood;
+  return (
+    <>
+      <div className="team-tabs" role="tablist">
+        {ctx.channels.map((c) => (
+          <button key={c.id} role="tab" aria-selected={c.id === cid} className={c.id === cid ? 'on' : ''} onClick={() => c.id !== cid && nav(`/chats/${c.id}`, { replace: true })}>
+            {c.team_channel ? <Icon name={TAB_ICON[c.team_channel]} size={14} /> : <span className="h">#</span>}{c.name[0].toUpperCase() + c.name.slice(1)}
+          </button>
+        ))}
+        <button role="tab" onClick={onFiles}><Icon name="file" size={14} />Files</button>
+      </div>
+      <div className="team-strip">
+        <button className="ts-card" onClick={() => nav('/?tab=work&view=schedule')}>
+          <Icon name="clock" size={16} />
+          <span>{s ? <><small>Upcoming shift</small><b>{whenDay(s.day)} · {schedSpan(s)}</b></> : <><small>Upcoming shift</small><b className="muted">None scheduled</b></>}</span>
+        </button>
+        {m && <button className="ts-card" onClick={() => nav('/?tab=work&view=calendar')}><Icon name="users" size={16} /><span><small>{m.title || 'Meeting'}</small><b>{whenDay(m.day)} · {schedSpan(m).split(' – ')[0]}</b></span></button>}
+        {tm && tm.participants > 0 && (
+          <button className={`ts-card mood ${moodOpen ? 'on' : ''}`} onClick={onMood}><span className="e">{tm.top.emoji}</span><span><small>Team mood</small><b>{tm.top.label} {tm.top.pct}%</b></span></button>
+        )}
+      </div>
+      {moodOpen && tm && (
+        <div className="team-mood-pop">
+          <b>Current team mood</b><small>{tm.participants} of {tm.members} teammates shared a mood</small>
+          {tm.distribution.map((d) => <div key={d.mood} className="tm-row"><span className="l">{d.emoji} {d.label}</span><span className="t"><i style={{ width: `${d.pct}%` }} /></span><b>{d.pct}%</b></div>)}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Reminder for the whole team (managers, team leaders and SMEs). */
+function ReminderSheet({ cid, onClose }) {
+  const { toast } = useApp();
+  const [text, setText] = useState('');
+  const [at, setAt] = useState('');
+  const send = async () => {
+    try { await api('/work/reminders', { method: 'POST', body: { conversationId: cid, text, at: at || undefined } }); toast('Reminder sent to the team', 'success'); onClose(); } catch (e) { toast(e.message, 'error'); }
+  };
+  return (
+    <Sheet title="Reminder" onClose={onClose} footer={<button className="btn block" disabled={!text.trim()} onClick={send}>Send reminder</button>}>
+      <label className="label" style={{ marginTop: 0 }}>Remind the team</label>
+      <textarea className="input" rows={3} value={text} onChange={(e) => setText(e.target.value)} maxLength={300} placeholder="e.g. Submit your timesheets before 5 PM" autoFocus />
+      <label className="label">When <span className="muted">(optional)</span></label>
+      <input className="input" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
+      <p className="small muted">Posted in this channel and sent to every member as a notification.</p>
+    </Sheet>
+  );
+}
 
 const EMOJIS = '😀 😂 🥹 😊 😍 🥰 😘 😎 🤩 🥳 😇 🙂 😉 😌 😴 🤔 🧐 😮 😢 😭 😤 😠 🤯 😱 🙄 😬 🤗 🤭 👍 👎 👏 🙌 🙏 💪 👋 🤝 ❤️ 🧡 💛 💚 💙 💜 🖤 💯 🔥 ✨ 🎉 🎂 ☕ 🍕 🌞 🌙 ⭐ 🌈 ✅ ❌ 👀 💬'.split(' ');
 const QUICK = ['❤️', '😂', '😮', '😢', '😡', '👍'];
@@ -98,12 +206,26 @@ export default function ChatRoom() {
   const [panel, setPanel] = useState(null);
   const [img, setImg] = useState(null);
   const [error, setError] = useState(null);
+  const [ctx, setCtx] = useState(null);
+  const [mediaOpen, setMediaOpen] = useState(false);
+  const [moodOpen, setMoodOpen] = useState(false);
+  const [work, setWork] = useState(null); // team context for the quick actions
+  const [tool, setTool] = useState(null); // 'menu' | 'shift' | 'meeting' | 'announce' | 'reminder' | 'places' | 'files'
+  const [viewer, setViewer] = useState(null);
   const listRef = useRef();
   const fileRef = useRef();
   const typingTimer = useRef();
   const stick = useRef(true);
 
   const loadConv = () => api(`/conversations/${cid}`).then(setConv).catch((e) => setError(e.message));
+  const loadCtx = () => api(`/conversations/${cid}/context`).then(setCtx).catch(() => setCtx(null));
+  useEffect(() => { setCtx(null); setMediaOpen(false); setMoodOpen(false); loadCtx(); }, [cid]);
+  const openTool = async (t) => {
+    if (['shift', 'meeting', 'announce'].includes(t) && !work) {
+      try { setWork(await api(`/work/context?team=${conv.team.id}`)); } catch (e) { return toast(e.message, 'error'); }
+    }
+    setTool(t);
+  };
   const markRead = () => api(`/conversations/${cid}/read`, { method: 'POST' }).then(refreshUnread).catch(() => {});
   useEffect(() => {
     setMessages(null);
@@ -119,7 +241,7 @@ export default function ChatRoom() {
     if (conversationId !== cid) return;
     setMessages((m) => (m && !m.some((x) => x.id === message.id) ? [...m, message] : m));
     if (message.sender_id !== user.id) markRead();
-    if (message.kind === 'system') loadConv();
+    if (message.kind === 'system') { loadConv(); loadCtx(); }
     setTyping((t) => ({ ...t, [message.sender_id]: undefined }));
   });
   useSocket('message:update', ({ conversationId, message }) => {
@@ -131,6 +253,17 @@ export default function ChatRoom() {
   });
   useSocket('typing', ({ conversationId, userId, name, typing: on }) => {
     if (conversationId === cid) setTyping((t) => ({ ...t, [userId]: on ? name : undefined }));
+  });
+  // A teammate checked in a new mood: refresh the header (direct chat) or their badge in a team channel.
+  const [moods, setMoods] = useState({});
+  const senderMood = (id) => moods[id];
+  useSocket('mood:update', ({ userId }) => {
+    if (!conv) return;
+    if (conv.type === 'direct' && conv.other?.id === userId) loadConv();
+    if (conv.team) {
+      api(`/work/members?team=${conv.team.id}`).then((list) => setMoods(Object.fromEntries(list.filter((x) => x.mood).map((x) => [x.id, x.mood])))).catch(() => {});
+      loadCtx();
+    }
   });
   useSocket('conversation:update', ({ id: x }) => {
     if (x === cid) loadConv().then(() => {}).catch(() => {});
@@ -195,20 +328,34 @@ export default function ChatRoom() {
   const pinned = messages.filter((m) => m.pinned && !m.deleted).at(-1);
   const myLast = [...messages].reverse().find((m) => m.sender_id === user.id && m.kind === 'text');
   const seenBy = myLast ? others.filter((o) => o.last_read_id >= myLast.id) : [];
+  // Header status: typing, then (teammates only) today's mood, then presence.
+  const wm = conv.work_mood;
   const sub = typingNames.length ? `${typingNames[0].split(' ')[0]} is typing…`
-    : conv.team ? `${conv.team.name} · ${conv.members.length} members` : conv.type === 'group' ? `${conv.members.length} members` : conv.other?.online ? 'Active now' : conv.other?.job_title || '';
+    : conv.team ? `${conv.team.name} · ${conv.members.length} members` : conv.type === 'group' ? `${conv.members.length} members`
+      : wm ? `${wm.emoji} ${wm.label} ${wm.day === new Date().toLocaleDateString('en-CA') ? 'today' : 'yesterday'}${conv.other?.online ? ' · Active now' : ''}`
+        : conv.other?.online ? 'Active now' : conv.other?.username ? `@${conv.other.username}` : '';
+  const call = (kind) => startCall(cid, kind, { title: conv.team ? `#${conv.title} · ${conv.team.name}` : conv.title, avatar: conv.team ? conv.team.logo : conv.avatar });
+  const bg = conv.type === 'direct' ? conv.avatar : conv.team ? conv.team.logo : conv.avatar;
 
   return (
-    <div className="chat-room">
+    <div className="chat-room v2">
+      {bg && <div className="chat-bg" style={{ backgroundImage: `url(${bg})` }} aria-hidden="true" />}
       <div className="chat-head">
         <button className="icon-btn" onClick={() => nav('/chats')} aria-label="Back"><Icon name="back" /></button>
-        {conv.team ? <TeamLogo team={conv.team} size={38} /> : <Avatar src={conv.avatar} size={38} online={conv.type === 'direct' && conv.other?.online} onClick={() => conv.type === 'direct' && nav(`/u/${conv.other.id}`)} />}
+        {conv.team ? <TeamLogo team={conv.team} size={40} /> : <Avatar src={conv.avatar} size={40} online={conv.type === 'direct' && conv.other?.online} onClick={() => conv.type === 'direct' && nav(`/u/${conv.other.id}`)} />}
         <div className="meta" onClick={() => nav(`/chats/${cid}/info`)} style={{ cursor: 'pointer' }}>
           <div className="title">{conv.team ? `#${conv.title}` : conv.title} <Streak n={conv.streak} /></div>
-          <div className="sub" style={typingNames.length ? { color: 'var(--primary)' } : undefined}>{sub}</div>
+          <div className={`sub ${wm && !typingNames.length ? 'mood' : ''}`} style={typingNames.length ? { color: 'var(--primary)' } : undefined}>{sub}</div>
         </div>
+        {!conv.blocked && <>
+          <button className="icon-btn" onClick={() => call('audio')} aria-label="Voice call"><Icon name="phone" size={21} /></button>
+          <button className="icon-btn" onClick={() => call('video')} aria-label="Video call"><Icon name="video" size={22} /></button>
+        </>}
         <button className="icon-btn" onClick={() => nav(`/chats/${cid}/info`)} aria-label="Chat info"><Icon name="more" /></button>
       </div>
+      {conv.type === 'direct' && <ContextBar ctx={ctx} mediaOpen={mediaOpen} onMedia={() => setMediaOpen(!mediaOpen)} onPlaces={() => setTool('places')} />}
+      {conv.team && <TeamBar ctx={ctx} cid={cid} onFiles={() => setTool('files')} onMood={() => setMoodOpen(!moodOpen)} moodOpen={moodOpen} />}
+      {mediaOpen && <MediaStrip cid={cid} onImage={setImg} />}
       {pinned && (
         <button className="pinned-bar" onClick={() => setPanel('pinned')}>
           <Icon name="pin" size={16} style={{ color: 'var(--fire)' }} />
@@ -231,7 +378,7 @@ export default function ChatRoom() {
           return (
             <Fragment key={m.id}>
               {newDay && <div className="day-sep">{dayLabel(m.created_at)}</div>}
-              {conv.type === 'group' && !me && groupStart && <div className="msg-sender" style={{ marginLeft: 44 }}>{m.sender?.full_name}</div>}
+              {conv.type === 'group' && !me && groupStart && <div className="msg-sender" style={{ marginLeft: 44 }}>{m.sender?.full_name}{m.sender_mood && <> <WorkMood mood={senderMood(m.sender_id) || m.sender_mood} /></>}</div>}
               <div className={`msg-row ${me ? 'me' : ''}`} style={{ marginTop: groupStart ? 6 : 0 }}>
                 {!me && <div style={{ width: 30 }}>{groupEnd && <Avatar user={m.sender} size={28} />}</div>}
                 <div className="msg-col">
@@ -275,6 +422,7 @@ export default function ChatRoom() {
       {emojiOpen && <div className="emoji-panel">{EMOJIS.map((e) => <button key={e} onClick={() => setText((t) => t + e)}>{e}</button>)}</div>}
       {conv.blocked ? <div className="blocked-bar">You can't message this person. <button className="link-btn" onClick={() => nav(`/chats/${cid}/info`)}>Manage</button></div> : (
       <form className="chat-input" onSubmit={send}>
+        {conv.team && ctx?.can?.schedule && <button type="button" className="icon-btn plus" onClick={() => setTool('menu')} aria-label="Create schedule, meeting, announcement or reminder"><Icon name="plus" /></button>}
         <button type="button" className="icon-btn" onClick={() => { fileRef.current.accept = 'image/*'; fileRef.current.click(); }} aria-label="Send photo"><Icon name="image" /></button>
         <button type="button" className="icon-btn" onClick={() => { fileRef.current.accept = ''; fileRef.current.click(); }} aria-label="Attach video or file"><Icon name="clip" /></button>
         <button type="button" className="icon-btn" onClick={() => setEmojiOpen(!emojiOpen)} aria-label="Emoji" style={emojiOpen ? { color: 'var(--primary)' } : undefined}><Icon name="smile" /></button>
@@ -307,6 +455,34 @@ export default function ChatRoom() {
         </Sheet>
       )}
       {panel === 'pinned' && <PinnedSheet cid={cid} onClose={() => setPanel(null)} onUnpin={pin} />}
+      {tool === 'menu' && (
+        <Sheet title={`Create for ${conv.team.name}`} onClose={() => setTool(null)}>
+          <div className="menu-list">
+            <button onClick={() => openTool('shift')}><Icon name="clock" /> Work schedule</button>
+            <button onClick={() => openTool('meeting')}><Icon name="users" /> Meeting</button>
+            {ctx?.can?.announce && <button onClick={() => openTool('announce')}><Icon name="megaphone" /> Announcement</button>}
+            <button onClick={() => setTool('reminder')}><Icon name="bell" /> Reminder</button>
+          </div>
+        </Sheet>
+      )}
+      {(tool === 'shift' || tool === 'meeting') && work && <ScheduleForm ctx={work} day={new Date().toLocaleDateString('en-CA')} initialKind={tool === 'meeting' ? 'meeting' : 'shift'} onClose={() => setTool(null)} onSaved={loadCtx} />}
+      {tool === 'announce' && work && <WorkComposer ctx={work} initialKind="announcement" onClose={() => setTool(null)} onPosted={() => toast('Announcement posted', 'success')} />}
+      {tool === 'reminder' && <ReminderSheet cid={cid} onClose={() => setTool(null)} />}
+      {tool === 'files' && (
+        <Sheet title={`Files in #${conv.title}`} onClose={() => setTool(null)}><MediaStrip cid={cid} onImage={setImg} /></Sheet>
+      )}
+      {tool === 'places' && ctx?.locationStories && (
+        <Sheet title="Location stories" onClose={() => setTool(null)}>
+          {ctx.locationStories.places.map((p) => (
+            <button key={p.place} className="place-row" onClick={() => { setTool(null); setViewer({ groups: [{ user: ctx.locationStories.user, stories: p.stories }], title: p.place }); }}>
+              <span className="pl-ic"><Icon name="location" size={18} /></span>
+              <span className="meta"><b>{p.place}</b><small>{p.count} {p.count === 1 ? 'story' : 'stories'}</small></span>
+              <Icon name="next" size={16} />
+            </button>
+          ))}
+        </Sheet>
+      )}
+      {viewer && <StoryViewer groups={viewer.groups} onClose={() => setViewer(null)} onChanged={loadCtx} />}
       <Lightbox src={img} onClose={() => setImg(null)} />
     </div>
   );

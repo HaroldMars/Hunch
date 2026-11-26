@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
-import { TEAM_ROLES, TEAM_ROLE_LABELS, TEAM_ROLE_INFO, moodByKey } from '@shared/constants.js';
+import { TEAM_ROLES, TEAM_ROLE_LABELS, TEAM_ROLE_INFO } from '@shared/constants.js';
 import { ScheduleCalendar, TeamMoodPanel, KINDS, span, ymd, shiftDay, weekStart, parseDay, fmtTime } from '@shared/work/WorkWidgets.jsx';
 import { api, toForm } from '../api.js';
 import { useApp } from '../store.jsx';
-import { Avatar, Sheet, Spinner, Empty, Confirm, FilePreviews, TeamLogo, timeAgo } from '../components/ui.jsx';
+import { Avatar, Sheet, Spinner, Empty, Confirm, FilePreviews, TeamLogo, WorkMood, timeAgo } from '../components/ui.jsx';
 import { PostCard } from '../components/Post.jsx';
 import { StoryBar, StoryViewer } from '../components/Stories.jsx';
 
@@ -38,6 +38,7 @@ export default function WorkTab({ initialView }) {
   const views = [
     ['home', 'Home', 'home'], ['feed', 'Feed', 'cards'], ['chat', 'Chat', 'chat'], ['schedule', 'Schedule', 'clock'], ['calendar', 'Calendar', 'calendar'],
     ['announcements', 'Announcements', 'megaphone'], ['projects', 'Projects', 'layers'], ['members', 'Members', 'users'],
+    ...(ctx.canMood ? [['mood', 'Team Mood', 'smile']] : []),
     ...(ctx.canAnalytics ? [['analytics', 'Analytics', 'chart']] : []),
   ];
   const go = (v) => setView(v);
@@ -69,7 +70,8 @@ export default function WorkTab({ initialView }) {
       {view === 'announcements' && <WorkFeed ctx={ctx} only="announcement" />}
       {view === 'projects' && <WorkProjects ctx={ctx} />}
       {view === 'members' && <WorkTeam ctx={ctx} onCtx={loadCtx} onInvite={() => setSheet('invite')} onGone={() => { pick(null); setView('home'); }} />}
-      {view === 'analytics' && <WorkAnalytics ctx={ctx} />}
+      {view === 'mood' && <WorkTeamMood ctx={ctx} />}
+      {view === 'analytics' && <WorkAnalytics ctx={ctx} onMood={() => go('mood')} />}
       {sheets}
     </div>
   );
@@ -382,7 +384,7 @@ function WorkFeed({ ctx, only }) {
   );
 }
 
-function WorkComposer({ ctx, initialKind = 'post', onClose, onPosted }) {
+export function WorkComposer({ ctx, initialKind = 'post', onClose, onPosted }) {
   const { toast } = useApp();
   const [text, setText] = useState('');
   const [files, setFiles] = useState([]);
@@ -581,11 +583,12 @@ function TimeRow({ label, start, end, onStart, onEnd, optional }) {
 }
 
 /** Create schedule: employee, date, start, end, break, remarks (optionally repeated on chosen weekdays). */
-function ScheduleForm({ ctx, day, onClose, onSaved }) {
+export function ScheduleForm({ ctx, day, initialKind = 'shift', onClose, onSaved }) {
   const { toast } = useApp();
   const [members, setMembers] = useState([]);
   useEffect(() => { api(`/work/members?team=${ctx.team.id}`).then(setMembers); }, []);
-  const [f, setF] = useState({ kind: 'shift', title: '', start_time: '08:00', end_time: '17:00', break_start: '12:00', break_end: '13:00', notes: '', who: 'people', users: [], day, repeat: [], weeks: 1 });
+  const meeting = initialKind === 'meeting';
+  const [f, setF] = useState({ kind: initialKind, title: '', start_time: meeting ? '09:00' : '08:00', end_time: meeting ? '09:30' : '17:00', break_start: '12:00', break_end: '13:00', notes: '', who: meeting ? 'team' : 'people', users: [], day, repeat: [], weeks: 1 });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const presets = { shift: ['08:00', '17:00'], lunch: ['12:00', '13:00'], meeting: ['09:00', '09:30'], overtime: ['17:00', '19:00'], coaching: ['15:00', '15:30'], training: ['13:00', '16:00'], rest: ['', ''] };
   const dows = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -646,7 +649,7 @@ function ScheduleForm({ ctx, day, onClose, onSaved }) {
 }
 
 /** Weekly schedule for one employee: Monday–Sunday, each day a shift with a break, or OFF. */
-function WeekForm({ ctx, userId, week: initialWeek, onClose, onSaved }) {
+export function WeekForm({ ctx, userId, week: initialWeek, onClose, onSaved }) {
   const { toast } = useApp();
   const [members, setMembers] = useState([]);
   const [who, setWho] = useState(userId || '');
@@ -904,7 +907,7 @@ function WorkTeam({ ctx, onCtx, onInvite, onGone }) {
               <div key={r} className={`hz-level lv-${r}`}>
                 <div className="hz-label"><span className={`role-tag ${r}`}>{TEAM_ROLE_LABELS[r]}{list.length > 1 && r !== 'manager' ? 's' : ''}</span><small>{list.length}</small></div>
                 {list.map((m) => {
-                  const mood = moodByKey(m.mood_today);
+                  const { mood } = m;
                   return (
                     <div key={m.id} className="row-item">
                       <Avatar user={m} size={40} />
@@ -912,7 +915,7 @@ function WorkTeam({ ctx, onCtx, onInvite, onGone }) {
                         <div className="title">{m.full_name}{m.id === user.id ? ' (you)' : ''}{m.is_owner && <span className="role-tag owner" style={{ marginLeft: 6 }}>Owner</span>}</div>
                         <div className="sub">{m.active_days_7 !== undefined ? `Active ${m.active_days_7}/7 days${m.last_active_at ? ` · last seen ${timeAgo(m.last_active_at)}` : ''}` : TEAM_ROLE_LABELS[m.team_role]}</div>
                       </div>
-                      {mood && <span title={`Today: ${mood.label}`} style={{ fontSize: 20 }}>{mood.emoji}</span>}
+                      {mood && <span className="member-mood" title={`${mood.label}${mood.note ? `: ${mood.note}` : ''}`}>{mood.emoji}</span>}
                       {canAct(m) && <button className="icon-btn" onClick={() => setActing(m)} aria-label={`Manage ${m.full_name}`}><Icon name="more" size={20} /></button>}
                     </div>
                   );
@@ -1027,8 +1030,63 @@ function NewChannel({ team, onClose, onCreated }) {
   );
 }
 
+// ---------- team mood (managers, team leaders and SMEs) ----------
+const relDay = (day) => {
+  const diff = Math.round((parseDay(ymd(new Date())) - parseDay(day)) / 864e5);
+  return diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : `${diff} days ago`;
+};
+function WorkTeamMood({ ctx }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [period, setPeriod] = useState('week');
+  const load = () => api(`/work/mood?team=${ctx.team.id}`).then(setData).catch(setErr);
+  useEffect(() => { setData(null); load(); }, [ctx.team.id]);
+  if (err) return <Empty icon="lock" title="Not available">{err.message}</Empty>;
+  if (!data) return <Spinner />;
+  const dist = period === 'week' ? data.week.distribution : data.today.distribution;
+  return (
+    <div style={{ padding: '4px 16px 16px' }}>
+      <div className="wk-note" style={{ marginBottom: 10 }}><Icon name="lock" size={16} /><span><b>Team wellbeing</b><small>Moods from teammates with Work Mode on. {data.optedOut > 0 ? `${data.optedOut} member${data.optedOut === 1 ? ' has' : 's have'} Work Mode off and ${data.optedOut === 1 ? 'isn’t' : 'aren’t'} included.` : 'Only your team’s managers, team leaders and SMEs see this page.'}</small></span></div>
+
+      <div className="an-card">
+        <div className="tm-h"><b>Team Mood Summary</b>
+          <div className="seg sm">{[['today', 'Today'], ['week', '7 days']].map(([k, l]) => <button key={k} className={period === k ? 'active' : ''} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+        </div>
+        {!dist.length ? <div className="wh-none">No mood check-ins {period === 'today' ? 'today' : 'this week'} yet.</div> : (
+          <div className="tm-dist">
+            {dist.map((m) => (
+              <div key={m.mood} className="tm-row"><span className="l">{m.emoji} {m.label}</span><span className="t"><i style={{ width: `${m.pct}%` }} /></span><b>{m.pct}%</b></div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="an-card">
+        <b>Current moods & history</b>
+        {!data.people.length ? <div className="wh-none">No teammates have Work Mode on yet.</div> : data.people.map((p) => (
+          <div key={p.user.id} className="tm-person">
+            <Avatar user={p.user} size={38} />
+            <div className="tm-main">
+              <div className="tm-name"><b>{p.user.full_name}</b><span className={`role-tag ${p.role}`}>{TEAM_ROLE_LABELS[p.role]}</span></div>
+              {p.current ? (
+                <div className="tm-now">{p.current.emoji} <b>{p.current.label}</b> <small>{relDay(p.current.day)}{p.current.note ? ` · “${p.current.note}”` : ''}</small></div>
+              ) : <div className="tm-now muted"><small>No mood shared today</small></div>}
+              {p.history.length > 0 && (
+                <div className="tm-hist">{p.history.slice(0, 4).map((h, i) => <span key={h.day} title={`${h.label}${h.note ? `: ${h.note}` : ''} · ${relDay(h.day)}`}>{h.emoji}<small>{i === 0 && p.current ? 'Previous' : relDay(h.day)}</small></span>)}</div>
+              )}
+            </div>
+            {p.changes > 2 && <span className="tm-flag" title="Mood changed often this week">↕ {p.changes}</span>}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 10 }}><TeamMoodPanel data={data} Avatar={Avatar} /></div>
+    </div>
+  );
+}
+
 // ---------- analytics (managers and the owner) ----------
-function WorkAnalytics({ ctx }) {
+function WorkAnalytics({ ctx, onMood }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   useEffect(() => { setData(null); api(`/work/analytics?team=${ctx.team.id}`).then(setData).catch(setErr); }, [ctx.team.id]);
@@ -1059,7 +1117,10 @@ function WorkAnalytics({ ctx }) {
           <div key={c.id} className="an-row"><span className="hash">#</span><span className="who"><b>{c.name}</b></span><small>{c.messages} messages</small></div>
         ))}
       </div>
-      <div className="an-card"><b>Team mood</b><div style={{ marginTop: 8 }}><TeamMoodPanel data={data.mood} Avatar={Avatar} /></div></div>
+      <button className="an-card an-link" onClick={onMood}>
+        <span><b>Team mood</b><small>{data.mood.week.top ? `Most common this week: ${data.mood.week.top.emoji} ${data.mood.week.top.label} · ${data.mood.week.participation}% took part` : 'No check-ins this week yet'}</small></span>
+        <Icon name="next" size={18} />
+      </button>
     </div>
   );
 }

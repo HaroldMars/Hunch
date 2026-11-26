@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import Icon from '@shared/Icon.jsx';
 import { api, toForm } from '../api.js';
 import { useApp, useSocket } from '../store.jsx';
-import { Avatar, HeaderActions, Sheet, Spinner, Empty, TeamLogo, listTime, timeAgo, useLoad, FilePreviews } from '../components/ui.jsx';
+import { Avatar, HeaderActions, Sheet, Spinner, Empty, TeamLogo, WorkMood, listTime, useLoad, FilePreviews } from '../components/ui.jsx';
+import { MoodCloudsRow, NoteView, NoteComposer } from '../components/MoodClouds.jsx';
 
 export function Streak({ n }) {
   if (!n || n < 2) return null;
@@ -64,68 +65,117 @@ function NewChatSheet({ onClose }) {
   );
 }
 
+const timeShort = (d) => {
+  const s = (Date.now() - new Date(d)) / 1000;
+  return s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : listTime(d);
+};
+
+function ChatRow({ c, me, onOpen }) {
+  const lm = c.last_message;
+  const prefix = lm && lm.kind !== 'system' && lm.sender_id === me ? 'You: ' : c.type === 'group' && lm?.sender_name && lm.kind !== 'system' ? `${lm.sender_name}: ` : '';
+  return (
+    <button className={`chat-row ${c.unread ? 'unread' : ''}`} onClick={onOpen}>
+      {c.team ? <span className="cr-chan"><span className="hash">#</span></span> : <Avatar src={c.avatar} size={54} online={c.type === 'direct' && c.other?.online} />}
+      <div className="cr-main">
+        <div className="cr-top">
+          <span className="cr-name">{c.type === 'group' && !c.team && <Icon name="users" size={14} />}{c.title}</span>
+          <span className="cr-time">{lm ? timeShort(lm.created_at) : ''}</span>
+        </div>
+        <div className="cr-bottom">
+          <span className="cr-last">{c.unread > 1 ? `${c.unread} new messages` : lm ? prefix + lm.text : 'Say hi 👋'}</span>
+          <span className="cr-badges">
+            <Streak n={c.streak} /><WorkMood mood={c.work_mood} />
+            {c.muted && <Icon name="bellOff" size={14} style={{ color: 'var(--text-3)' }} />}
+            {c.unread > 0 && <span className="pill-count">{c.unread > 99 ? '99+' : c.unread}</span>}
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 export default function Chats() {
   const { user, refreshUnread } = useApp();
   const nav = useNavigate();
   const [convs, setConvs] = useState(null);
+  const [teamConvs, setTeamConvs] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [notes, setNotes] = useState(null);
   const [q, setQ] = useState('');
   const [sheet, setSheet] = useState(null);
   const [archived, setArchived] = useState(false);
-  // Work Mode splits Chats into Personal (friends, groups) and Teams (team channels).
-  const [scope, setScope] = useState('personal');
-  const teams = !!user.work_mode && scope === 'teams' && !archived;
-  const load = () => api(`/conversations${teams ? '?scope=teams' : archived ? '?archived=1' : ''}`).then(setConvs);
-  useEffect(() => { setConvs(null); load(); refreshUnread(); }, [archived, teams]);
+  const [filter, setFilter] = useState('all'); // all | personal | groups | teams
+  const work = !!user.work_mode;
+  const load = () => {
+    api(`/conversations${archived ? '?archived=1' : ''}`).then(setConvs);
+    if (work && !archived) {
+      api('/conversations?scope=teams').then(setTeamConvs).catch(() => setTeamConvs([]));
+      api('/work/chat-teams').then(setTeams).catch(() => setTeams([]));
+    }
+  };
+  const loadNotes = () => api('/notes').then(setNotes).catch(() => setNotes({ mine: null, friends: [] }));
+  useEffect(() => { setConvs(null); load(); refreshUnread(); }, [archived]);
+  useEffect(() => { loadNotes(); }, []);
   useSocket('message:new', load);
   useSocket('conversation:update', load);
   useSocket('message:read', load);
+  useSocket('mood:update', load);
 
-  const filtered = useMemo(() => (convs || []).filter((c) => `${c.title} ${c.team?.name || ''}`.toLowerCase().includes(q.toLowerCase())), [convs, q]);
+  const match = (c) => `${c.title} ${c.team?.name || ''}`.toLowerCase().includes(q.toLowerCase());
+  const shown = useMemo(() => (convs || []).filter(match).filter((c) => (filter === 'personal' ? c.type === 'direct' : filter === 'groups' ? c.type === 'group' : true)), [convs, q, filter]);
+  const teamGroups = useMemo(() => teams.map((t) => ({ ...t, channels: teamConvs.filter((c) => c.team?.id === t.id && match(c)) })).filter((t) => t.channels.length || t.name.toLowerCase().includes(q.toLowerCase())), [teams, teamConvs, q]);
+  const unreadOf = (list) => list.reduce((n, c) => n + (c.unread || 0), 0);
+  const chips = [['all', 'All'], ['personal', 'Personal'], ['groups', 'Groups'], ...(work ? [['teams', 'Teams']] : [])];
 
   return (
-    <div className="page flush">
+    <div className="page flush chats-v2">
       <div className="topbar">
         {archived ? <><button className="icon-btn" onClick={() => setArchived(false)} aria-label="Back to chats"><Icon name="back" /></button><h2>Archived chats</h2></> : <h1>Chats</h1>}
         <div className="spacer" />
-        {!archived && !teams && <button className="icon-btn" onClick={() => setArchived(true)} aria-label="Archived chats" title="Archived chats"><Icon name="inbox" size={23} /></button>}
-        {!teams && <button className="icon-btn" onClick={() => setSheet({ type: 'new' })} aria-label="New message"><Icon name="edit" size={23} /></button>}
+        {!archived && <button className="icon-btn" onClick={() => setArchived(true)} aria-label="Archived chats" title="Archived chats"><Icon name="inbox" size={23} /></button>}
+        <button className="icon-btn" onClick={() => setSheet({ type: 'new' })} aria-label="New message"><Icon name="edit" size={23} /></button>
         <HeaderActions />
       </div>
-      {user.work_mode && !archived && (
-        <div className="tabs chat-scope" role="tablist">
-          {[['personal', 'Personal'], ['teams', 'Teams']].map(([k, l]) => <button key={k} role="tab" aria-selected={scope === k} className={scope === k ? 'active' : ''} onClick={() => setScope(k)}>{l}</button>)}
+      {!archived && <MoodCloudsRow notes={notes} onMine={() => setSheet(notes?.mine ? { type: 'view', note: notes.mine } : { type: 'edit' })} onOpen={(n) => setSheet({ type: 'view', note: n })} />}
+      <div style={{ padding: '0 16px' }}>
+        <div className="search-bar glass"><Icon name="search" size={20} stroke={2.2} /><input placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search chats" /></div>
+      </div>
+      {!archived && (
+        <div className="chat-chips" role="tablist">
+          {chips.map(([k, l]) => {
+            const n = k === 'teams' ? unreadOf(teamConvs) : k === 'personal' ? unreadOf((convs || []).filter((c) => c.type === 'direct')) : k === 'groups' ? unreadOf((convs || []).filter((c) => c.type === 'group')) : 0;
+            return <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>{l}{n > 0 && <i>{n > 99 ? '99+' : n}</i>}</button>;
+          })}
         </div>
       )}
-      <div style={{ padding: '4px 16px 0' }}>
-        <div className="search-bar"><Icon name="search" size={20} stroke={2.2} /><input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search chats" /></div>
-      </div>
-      <div style={{ padding: '4px 16px' }}>
-        {convs === null ? <Spinner /> : !filtered.length ? (
-          teams ? <Empty icon="briefcase" title={q ? 'No channels match' : 'No team chats yet'}>{q ? 'Try another name.' : <>Team channels appear here once you create or join a team. <button className="link-btn" onClick={() => nav('/?tab=work')}>Open Work</button></>}</Empty> : archived ? <Empty icon="inbox" title="No archived chats">Archive a chat from its profile page to tidy your list.</Empty> : <Empty icon="chat" title={q ? 'No chats match' : 'No conversations yet'}>
-            {q ? 'Try another name.' : <>Start chatting with a friend. <button className="link-btn" onClick={() => setSheet({ type: 'new' })}>New message</button></>}
-          </Empty>
-        ) : filtered.map((c) => {
-          const lm = c.last_message;
-          const prefix = lm && lm.kind !== 'system' && lm.sender_id === user.id ? 'You: ' : c.type === 'group' && lm?.sender_name && lm.kind !== 'system' ? `${lm.sender_name}: ` : '';
-          return (
-            <button key={c.id} className="row-item" style={{ width: '100%', background: 'none', border: 0, textAlign: 'left' }} onClick={() => nav(`/chats/${c.id}`)}>
-              {c.team ? <TeamLogo team={c.team} size={50} /> : <Avatar src={c.avatar} size={50} online={c.type === 'direct' && c.other?.online} />}
-              <div className="meta">
-                {c.team && <div className="chat-team">{c.team.name}</div>}
-                <div className="title">{c.team ? <span className="hash">#</span> : c.type === 'group' && <Icon name="users" size={15} />}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title}</span> <Streak n={c.streak} />{c.muted && <Icon name="bellOff" size={14} style={{ color: 'var(--text-3)' }} />}</div>
-                <div className={`sub ${c.unread ? 'unread' : ''}`}>
-                  {c.unread > 1 ? `${c.unread} new messages` : lm ? prefix + lm.text : 'Say hi 👋'}
-                </div>
+      <div className="chat-list">
+        {filter === 'teams' ? (
+          !teamGroups.length ? <Empty icon="briefcase" title={q ? 'No teams match' : 'No team chats yet'}>{q ? 'Try another name.' : <>Team channels appear here once you create or join a team. <button className="link-btn" onClick={() => nav('/?tab=work')}>Open Work</button></>}</Empty>
+            : teamGroups.map((t) => (
+              <div key={t.id} className="team-card">
+                <button className="tc-head" onClick={() => nav('/?tab=work')}>
+                  <TeamLogo team={t} size={48} />
+                  <span className="tc-meta">
+                    <b>{t.name}</b>
+                    <small>{t.members} member{t.members === 1 ? '' : 's'}{t.streak >= 2 ? <> · <span className="streak">🔥{t.streak}</span> team streak</> : ''}</small>
+                  </span>
+                  {t.mood && <span className="tc-mood" title="Most common mood on the team right now">{t.mood.emoji} {t.mood.label}<small>{t.mood.pct}%</small></span>}
+                </button>
+                {t.channels.map((c) => <ChatRow key={c.id} c={c} me={user.id} onOpen={() => nav(`/chats/${c.id}`)} />)}
               </div>
-              <div className="right">
-                {lm && <span>{listTime(lm.created_at)}</span>}
-                {c.unread > 0 && <span className="pill-count">{c.unread > 99 ? '99+' : c.unread}</span>}
-              </div>
-            </button>
-          );
-        })}
+            ))
+        ) : convs === null ? <Spinner /> : !shown.length ? (
+          archived ? <Empty icon="inbox" title="No archived chats">Archive a chat from its profile page to tidy your list.</Empty>
+            : <Empty icon="chat" title={q ? 'No chats match' : filter === 'groups' ? 'No group chats yet' : 'No conversations yet'}>{q ? 'Try another name.' : <>Start chatting with a friend. <button className="link-btn" onClick={() => setSheet({ type: 'new' })}>New message</button></>}</Empty>
+        ) : shown.map((c) => <ChatRow key={c.id} c={c} me={user.id} onOpen={() => nav(`/chats/${c.id}`)} />)}
       </div>
       {sheet?.type === 'new' && <NewChatSheet onClose={() => setSheet(null)} />}
+      {sheet?.type === 'edit' && <NoteComposer initial={sheet.note} onClose={() => setSheet(null)} onSaved={loadNotes} />}
+      {sheet?.type === 'view' && (
+        <NoteView note={sheet.note} onClose={() => setSheet(null)} onChanged={loadNotes}
+          onEdit={() => setSheet({ type: 'edit', note: sheet.note })}
+          onDelete={async () => { await api('/notes/me', { method: 'DELETE' }); setSheet(null); loadNotes(); }} />
+      )}
     </div>
   );
 }

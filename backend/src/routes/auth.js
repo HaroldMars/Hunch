@@ -100,14 +100,15 @@ function createMember({ full_name, email, username, password, method, avatar = n
   });
 }
 
-// Anyone can create a Hunch account. They verify their email, then complete their profile.
+// Anyone can create a Hunch account with name, email and password. They verify their email,
+// then choose their username, bio, interests and photo. A username sent here is used as-is; otherwise one is suggested.
 r.post('/signup', h((req, res) => {
   const { full_name = '', email = '', username = '', password = '', remember = true } = req.body || {};
   const name = String(full_name).trim().slice(0, 80);
   const mail = String(email).trim().toLowerCase();
   if (!name) fail(400, 'Enter your name.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) fail(400, 'Enter a valid email address.');
-  const uname = checkUsername(username);
+  const uname = String(username).trim() ? checkUsername(username) : suggestUsername(name.replace(/\s+/g, '.') || mail.split('@')[0]);
   const err = validatePassword(password);
   if (err) fail(400, err);
   if (get('SELECT id FROM users WHERE email = ?', mail)) fail(409, 'An account with this email already exists. Sign in instead.');
@@ -258,6 +259,8 @@ r.post('/complete-profile', auth({ ready: false }), imageUpload.single('avatar')
     full_name, username, String(b.job_title ?? u.job_title).slice(0, 80), String(b.bio ?? u.bio).slice(0, 300), String(b.location ?? u.location).slice(0, 80),
     interests, fileUrl(req.file), u.id);
   if (req.file) deleteStoredFiles(u.avatar);
+  // Optional last onboarding choice: turn on Work Mode.
+  if (b.work_mode !== undefined && !isStaff(u)) run('UPDATE users SET work_mode = ? WHERE id = ?', ['1', 'true', true, 1, 'on'].includes(b.work_mode) ? 1 : 0, u.id);
   res.json(sessionPayload(get('SELECT * FROM users WHERE id = ?', u.id), req.app_kind));
 }));
 
